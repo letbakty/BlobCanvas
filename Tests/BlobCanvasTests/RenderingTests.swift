@@ -118,6 +118,55 @@ final class LayerTests: XCTestCase {
     }
 }
 
+final class CanvasViewportTests: XCTestCase {
+
+    func testFitCentersSquareInWideView() {
+        let vp = CanvasViewport(canvasSize: CGSize(width: 100, height: 100),
+                                viewBounds: CGSize(width: 300, height: 100))
+        XCTAssertEqual(vp.scale, 1, accuracy: 1e-6)          // fits by height
+        XCTAssertEqual(vp.origin.x, 100, accuracy: 1e-6)     // centered horizontally
+        XCTAssertEqual(vp.origin.y, 0, accuracy: 1e-6)
+    }
+
+    func testRoundTripMapping() {
+        let vp = CanvasViewport(canvasSize: CGSize(width: 200, height: 150),
+                                viewBounds: CGSize(width: 400, height: 400), zoom: 2)
+        let canvasPoint = CGPoint(x: 73, y: 40)
+        let view = vp.canvasToView(canvasPoint)
+        let back = vp.viewToCanvas(view, clamped: false)
+        XCTAssertEqual(back.x, canvasPoint.x, accuracy: 1e-4)
+        XCTAssertEqual(back.y, canvasPoint.y, accuracy: 1e-4)
+    }
+
+    func testZoomKeepsFocalPointFixed() {
+        var vp = CanvasViewport(canvasSize: CGSize(width: 100, height: 100),
+                                viewBounds: CGSize(width: 100, height: 100))
+        let focal = CGPoint(x: 25, y: 25)
+        let before = vp.viewToCanvas(focal, clamped: false)
+        vp.zoom(by: 3, at: focal)
+        let after = vp.viewToCanvas(focal, clamped: false)
+        XCTAssertEqual(before.x, after.x, accuracy: 1e-3)
+        XCTAssertEqual(before.y, after.y, accuracy: 1e-3)
+    }
+
+    func testZoomClampedToRange() {
+        var vp = CanvasViewport(canvasSize: CGSize(width: 100, height: 100),
+                                viewBounds: CGSize(width: 100, height: 100),
+                                minZoom: 1, maxZoom: 4)
+        vp.zoom(by: 100, at: .zero)
+        XCTAssertEqual(vp.zoom, 4, accuracy: 1e-6)
+        vp.zoom(by: 0.001, at: .zero)
+        XCTAssertEqual(vp.zoom, 1, accuracy: 1e-6)
+    }
+
+    func testPanIgnoredWhenNotZoomed() {
+        var vp = CanvasViewport(canvasSize: CGSize(width: 100, height: 100),
+                                viewBounds: CGSize(width: 100, height: 100))
+        vp.translate(by: CGPoint(x: 50, y: 50))
+        XCTAssertEqual(vp.pan, .zero) // clamped back — nothing to pan at fit
+    }
+}
+
 final class ExporterTests: XCTestCase {
 
     private func sampleSession() -> DrawingSession {

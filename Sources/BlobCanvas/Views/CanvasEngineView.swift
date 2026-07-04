@@ -168,6 +168,15 @@ public final class CanvasEngineView: PlatformView {
         isMultipleTouchEnabled = false
         backgroundColor = .white
         contentMode = .redraw
+        let pinch = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
+        let twoFingerPan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
+        twoFingerPan.minimumNumberOfTouches = 2
+        twoFingerPan.maximumNumberOfTouches = 2
+        for recognizer in [pinch, twoFingerPan] as [UIGestureRecognizer] {
+            recognizer.cancelsTouchesInView = false   // keep single-finger drawing responsive
+            recognizer.delaysTouchesBegan = false
+            addGestureRecognizer(recognizer)
+        }
         #else
         wantsLayer = true
         layer?.backgroundColor = CGColor(gray: 1, alpha: 1)
@@ -287,31 +296,40 @@ public final class CanvasEngineView: PlatformView {
         setNeedsFullDisplay()
     }
 
-    // MARK: - Canvas ↔ view transform (aspect-fit, centered)
+    // MARK: - Canvas ↔ view transform (aspect-fit + zoom/pan)
 
-    private func fit() -> (origin: CGPoint, scale: CGFloat) {
-        guard canvasSize.width > 0, canvasSize.height > 0 else { return (.zero, 1) }
-        let s = min(bounds.width / canvasSize.width, bounds.height / canvasSize.height)
-        let drawn = CGSize(width: canvasSize.width * s, height: canvasSize.height * s)
-        let origin = CGPoint(x: (bounds.width - drawn.width) * 0.5,
-                             y: (bounds.height - drawn.height) * 0.5)
-        return (origin, s)
+    private func viewport() -> CanvasViewport {
+        CanvasViewport(canvasSize: canvasSize, viewBounds: bounds.size, zoom: zoomScale, pan: panOffset)
     }
 
-    private func viewToCanvas(_ p: CGPoint) -> CGPoint {
-        let f = fit()
-        guard f.scale > 0 else { return p }
-        return CGPoint(
-            x: min(max((p.x - f.origin.x) / f.scale, 0), canvasSize.width),
-            y: min(max((p.y - f.origin.y) / f.scale, 0), canvasSize.height)
-        )
+    private func viewToCanvas(_ p: CGPoint) -> CGPoint { viewport().viewToCanvas(p) }
+    private func canvasRectToView(_ r: CGRect) -> CGRect { viewport().canvasRectToView(r) }
+
+    /// Current zoom multiplier (1 = fit). Set via ``zoom(by:at:)`` or gestures.
+    public private(set) var zoomScale: CGFloat = 1
+    /// Current pan translation in view points.
+    public private(set) var panOffset: CGPoint = .zero
+
+    public func zoom(by factor: CGFloat, at focal: CGPoint) {
+        var vp = viewport()
+        vp.zoom(by: factor, at: focal)
+        zoomScale = vp.zoom
+        panOffset = vp.pan
+        setNeedsFullDisplay()
     }
 
-    private func canvasRectToView(_ r: CGRect) -> CGRect {
-        let f = fit()
-        return CGRect(x: r.origin.x * f.scale + f.origin.x,
-                      y: r.origin.y * f.scale + f.origin.y,
-                      width: r.width * f.scale, height: r.height * f.scale)
+    public func pan(by delta: CGPoint) {
+        var vp = viewport()
+        vp.translate(by: delta)
+        zoomScale = vp.zoom
+        panOffset = vp.pan
+        setNeedsFullDisplay()
+    }
+
+    public func resetZoom() {
+        zoomScale = 1
+        panOffset = .zero
+        setNeedsFullDisplay()
     }
 
     // MARK: - Live input (hot path)
@@ -403,6 +421,20 @@ public final class CanvasEngineView: PlatformView {
         onSessionChanged?(session)
     }
 
+    /// Discards the in-progress stroke without committing (e.g. when a zoom/pan
+    /// gesture takes over). Re-bakes so any incremental eraser pixels are undone.
+    private func cancelActiveStroke() {
+        guard isStroking else { return }
+        isStroking = false
+        #if canImport(UIKit)
+        activeTouch = nil
+        estimationMap.removeAll(keepingCapacity: true)
+        #endif
+        live?.clear()
+        clearPredicted()
+        rebake()
+    }
+
     // MARK: - Predicted tail
 
     /// Renders a short forecast ribbon from the last confirmed point through the
@@ -456,7 +488,7 @@ public final class CanvasEngineView: PlatformView {
     }
 
     private func viewDirtyRect(canvas rect: CGRect) -> CGRect {
-        let pad = (CGFloat(liveStroke.brushSize) + 2) * fit().scale
+        let pad = (CGFloat(liveStroke.brushSize) + 2) * viewport().scale
         return canvasRectToView(rect).insetBy(dx: -pad, dy: -pad)
     }
 
@@ -474,10 +506,7 @@ public final class CanvasEngineView: PlatformView {
 
     private func present(into target: CGContext?) {
         guard let target else { return }
-        let f = fit()
-        let rect = CGRect(origin: f.origin,
-                          size: CGSize(width: canvasSize.width * f.scale,
-                                       height: canvasSize.height * f.scale))
+        let rect = viewport().drawnRect
         if let image = committed?.makeImage() {
             drawUpright(image, in: rect, into: target, alpha: 1)
         }
@@ -580,6 +609,22 @@ extension CanvasEngineView {
     private func normalizedForce(_ touch: UITouch) -> CGFloat {
         touch.maximumPossibleForce > 0 ? max(touch.force / touch.maximumPossibleForce, 0.1) : 1
     }
+
+    // MARK: Zoom / pan gestures
+
+    @objc private func handlePinch(_ g: UIPinchGestureRecognizer) {
+        if g.state == .began { cancelActiveStroke() }
+        guard g.state == .changed else { return }
+        zoom(by: g.scale, at: g.location(in: self))
+        g.scale = 1
+    }
+
+    @objc private func handlePan(_ g: UIPanGestureRecognizer) {
+        if g.state == .began { cancelActiveStroke() }
+        guard g.state == .changed else { return }
+        pan(by: g.translation(in: self))
+        g.setTranslation(.zero, in: self)
+    }
 }
 #endif
 
@@ -602,6 +647,15 @@ extension CanvasEngineView {
 
     private func pressure(of event: NSEvent) -> CGFloat {
         event.pressure > 0 ? CGFloat(event.pressure) : 1
+    }
+
+    public override func magnify(with event: NSEvent) {
+        cancelActiveStroke()
+        zoom(by: 1 + event.magnification, at: convert(event.locationInWindow, from: nil))
+    }
+
+    public override func scrollWheel(with event: NSEvent) {
+        pan(by: CGPoint(x: event.scrollingDeltaX, y: event.scrollingDeltaY))
     }
 }
 #endif
