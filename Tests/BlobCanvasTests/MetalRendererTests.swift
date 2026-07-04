@@ -81,6 +81,21 @@ final class MetalRendererTests: XCTestCase {
         XCTAssertGreaterThan(pixel(image, 200, 50).a, 200) // painted along the line
     }
 
+    /// Shared instance is reusable and renders a smoothed multi-point stroke.
+    func testMetalSharedInstanceRendersSmoothedStroke() throws {
+        try XCTSkipIf(MetalSessionRenderer.shared == nil, "No Metal device available on this host")
+        let renderer = MetalSessionRenderer.shared!
+        var session = DrawingSession(canvasSize: SIMD2(120, 120))
+        var stroke = Stroke(color: StrokeColor(r: 0, g: 0, b: 0), brushSize: 10)
+        for i in 0..<12 {
+            stroke.append(StrokePoint(x: Float(10 + i * 8), y: Float(60 + (i % 2 == 0 ? -20 : 20)),
+                                      timestamp: Float(i) / 60))
+        }
+        session.commit(stroke)
+        let image = try XCTUnwrap(renderer.makeImage(session, scale: 1))
+        XCTAssertGreaterThan(pixel(image, 60, 60).a, 100) // stroke passes near the middle
+    }
+
     func testMetalScaleProducesLargerImage() throws {
         let renderer = try makeRenderer()
         let session = DrawingSession(canvasSize: SIMD2(40, 30))

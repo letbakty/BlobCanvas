@@ -12,7 +12,9 @@ import simd
 /// per-stroke single-coverage translucency (translucent self-overlaps double-
 /// blend), and group opacity — so translucent brushes and layer opacity differ
 /// slightly from `CoreGraphicsRenderer`. Opaque strokes match closely.
-public final class MetalSessionRenderer: SessionImageRenderer {
+/// Thread-safe: all stored properties are immutable, internally-synchronized
+/// Metal objects; `makeImage` allocates only transient per-call resources.
+public final class MetalSessionRenderer: SessionImageRenderer, @unchecked Sendable {
 
     private struct Vertex {
         var position: SIMD2<Float>
@@ -27,6 +29,10 @@ public final class MetalSessionRenderer: SessionImageRenderer {
     private let queue: MTLCommandQueue
     private let normalPipeline: MTLRenderPipelineState
     private let erasePipeline: MTLRenderPipelineState
+
+    /// Shared instance — reuse it, since `init` compiles the shader library
+    /// (tens of ms). `nil` when no Metal device is available.
+    public static let shared: MetalSessionRenderer? = MetalSessionRenderer()
 
     /// Fails if no Metal device is available (e.g. some CI runners).
     public init?() {
@@ -83,11 +89,18 @@ public final class MetalSessionRenderer: SessionImageRenderer {
         let width = max(1, Int((CGFloat(session.canvasSize.x) * scale).rounded()))
         let height = max(1, Int((CGFloat(session.canvasSize.y) * scale).rounded()))
 
+        // Render target lives in .private memory so this works on Intel Macs
+        // with a discrete GPU (where .shared render targets are disallowed).
+        // Pixels are blitted to a shared buffer for read-back below.
         let texDesc = MTLTextureDescriptor.texture2DDescriptor(
             pixelFormat: .rgba8Unorm, width: width, height: height, mipmapped: false)
-        texDesc.usage = [.renderTarget, .shaderRead]
-        texDesc.storageMode = .shared
+        texDesc.usage = [.renderTarget]
+        texDesc.storageMode = .private
         guard let texture = device.makeTexture(descriptor: texDesc) else { return nil }
+
+        let bytesPerRow = width * 4
+        guard let readback = device.makeBuffer(length: bytesPerRow * height, options: .storageModeShared)
+        else { return nil }
 
         let pass = MTLRenderPassDescriptor()
         pass.colorAttachments[0].texture = texture
@@ -132,38 +145,44 @@ public final class MetalSessionRenderer: SessionImageRenderer {
             }
         }
         encoder.endEncoding()
+
+        // Blit the private render target into the shared read-back buffer.
+        guard let blit = commandBuffer.makeBlitCommandEncoder() else { return nil }
+        blit.copy(from: texture, sourceSlice: 0, sourceLevel: 0,
+                  sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
+                  sourceSize: MTLSize(width: width, height: height, depth: 1),
+                  to: readback, destinationOffset: 0,
+                  destinationBytesPerRow: bytesPerRow, destinationBytesPerImage: bytesPerRow * height)
+        blit.endEncoding()
+
         commandBuffer.commit()
         commandBuffer.waitUntilCompleted()
 
-        return makeCGImage(from: texture)
+        return makeCGImage(from: readback, width: width, height: height, bytesPerRow: bytesPerRow)
     }
 
     // MARK: - Tessellation
 
     private func appendTessellation(of stroke: Stroke, into verts: inout [Vertex]) {
-        let pts = stroke.points
-        guard !pts.isEmpty else { return }
+        // Smoothed samples match the Core Graphics ribbon (Catmull-Rom).
+        let (centers, radii) = StrokeRasterizer.ribbonSamples(for: stroke, smoothing: true)
+        guard !centers.isEmpty else { return }
         let c = stroke.color
         // Erasers write alpha=1 into the destination-out blend.
         let color = stroke.blendMode == .erase
             ? SIMD4<Float>(0, 0, 0, 1)
             : SIMD4<Float>(Float(c.r) / 255, Float(c.g) / 255, Float(c.b) / 255, Float(c.a) / 255)
 
-        var prev: StrokePoint?
-        var prevR: CGFloat = 0
-        for p in pts {
-            let r = StrokeRasterizer.halfWidth(p, previous: prev, stroke)
-            appendDisc(&verts, center: p.cgPoint, radius: r, color: color)
-            if let a = prev {
-                appendQuad(&verts, from: a.cgPoint, to: p.cgPoint, ra: prevR, rb: r, color: color)
-            }
-            prev = p
-            prevR = r
+        appendDisc(&verts, center: centers[0], radius: radii[0], color: color)
+        for i in 1..<centers.count {
+            appendDisc(&verts, center: centers[i], radius: radii[i], color: color)
+            appendQuad(&verts, from: centers[i - 1], to: centers[i], ra: radii[i - 1], rb: radii[i], color: color)
         }
     }
 
     private func appendDisc(_ verts: inout [Vertex], center: CGPoint, radius: CGFloat, color: SIMD4<Float>) {
-        let segments = 12
+        // Segment count scales with radius so large brushes stay round.
+        let segments = min(max(Int((radius * 1.5).rounded()), 8), 64)
         let cx = Float(center.x), cy = Float(center.y), rr = Float(radius)
         for s in 0..<segments {
             let a0 = Float(s) / Float(segments) * 2 * .pi
@@ -193,15 +212,9 @@ public final class MetalSessionRenderer: SessionImageRenderer {
 
     // MARK: - Read-back
 
-    private func makeCGImage(from texture: MTLTexture) -> CGImage? {
-        let width = texture.width, height = texture.height
-        let bytesPerRow = width * 4
-        var bytes = [UInt8](repeating: 0, count: bytesPerRow * height)
-        bytes.withUnsafeMutableBytes { raw in
-            texture.getBytes(raw.baseAddress!, bytesPerRow: bytesPerRow,
-                             from: MTLRegionMake2D(0, 0, width, height), mipmapLevel: 0)
-        }
-        guard let provider = CGDataProvider(data: Data(bytes) as CFData) else { return nil }
+    private func makeCGImage(from buffer: MTLBuffer, width: Int, height: Int, bytesPerRow: Int) -> CGImage? {
+        let data = Data(bytes: buffer.contents(), count: bytesPerRow * height)
+        guard let provider = CGDataProvider(data: data as CFData) else { return nil }
         // rgba8Unorm with premultiplied source-over → premultipliedLast.
         return CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32,
                        bytesPerRow: bytesPerRow, space: StrokeRasterizer.colorSpace,

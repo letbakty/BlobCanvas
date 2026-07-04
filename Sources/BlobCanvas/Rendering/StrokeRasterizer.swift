@@ -71,16 +71,19 @@ public enum StrokeRasterizer {
 
     /// Builds the filled ribbon for a whole stroke as a single path (one fill =
     /// one coverage pass, so translucent self-overlaps never double-blend).
+    /// Centers and matching half-widths along a stroke — the input to both the
+    /// CG ribbon path and the Metal tessellation, so both stay in sync.
+    static func ribbonSamples(for stroke: Stroke, smoothing: Bool) -> (centers: [CGPoint], radii: [CGFloat]) {
+        if smoothing && stroke.points.count > 2 {
+            return smoothedSamples(for: stroke)
+        } else {
+            return (stroke.points.map { $0.cgPoint }, strideRadii(for: stroke))
+        }
+    }
+
     static func ribbonPath(for stroke: Stroke, smoothing: Bool) -> CGPath {
         let path = CGMutablePath()
-        let centers: [CGPoint]
-        let radii: [CGFloat]
-        if smoothing && stroke.points.count > 2 {
-            (centers, radii) = smoothedSamples(for: stroke)
-        } else {
-            centers = stroke.points.map { $0.cgPoint }
-            radii = strideRadii(for: stroke)
-        }
+        let (centers, radii) = ribbonSamples(for: stroke, smoothing: smoothing)
         guard let first = centers.first else { return path }
         if centers.count == 1 {
             addDot(path, at: first, radius: radii[0])
