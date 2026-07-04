@@ -56,6 +56,26 @@ final class CodecTests: XCTestCase {
         XCTAssertThrowsError(try DrawingBlobCodec.decode(blob.prefix(blob.count / 2)))
     }
 
+    /// A blob whose header declares an absurd stroke count must be rejected
+    /// before it drives a huge allocation.
+    func testImplausibleCountRejected() {
+        // Build a minimal valid header, then an inner payload with a bogus count.
+        var payload = Data()
+        payload.appendLE(Float(100))                  // canvasW
+        payload.appendLE(Float(100))                  // canvasH
+        payload.appendLE(UInt32.max)                  // strokeCount — absurd
+
+        var blob = Data()
+        blob.append(contentsOf: DrawingBlobCodec.magic)
+        blob.appendLE(DrawingBlobCodec.version)
+        blob.append(0)                                // algorithm: raw
+        blob.append(payload)
+
+        XCTAssertThrowsError(try DrawingBlobCodec.decode(blob)) { error in
+            XCTAssertEqual(error as? DrawingBlobCodec.CodecError, .implausibleCount)
+        }
+    }
+
     func testEncodePerformance10kPoints() {
         let session = makeSession(strokeCount: 50, pointsPerStroke: 200)
         measure {

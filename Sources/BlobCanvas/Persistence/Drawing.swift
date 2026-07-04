@@ -41,10 +41,25 @@ public extension Drawing {
         try DrawingSession(serialized: compressedData)
     }
 
-    /// Re-encodes the session into the blob. Call on auto-save / explicit
-    /// save — never per stroke. Cheap enough for a debounced timer.
-    func save(_ session: DrawingSession) {
+    /// Re-encodes the session into the blob synchronously. Fine for small
+    /// drawings on a debounced timer; for large ones prefer ``save(_:)`` async.
+    func saveSync(_ session: DrawingSession) {
         compressedData = session.serialized()
+        modifiedAt = .now
+    }
+
+    /// Encodes the session off the main actor (LZFSE compression can hitch on
+    /// large drawings), then assigns the blob back on the main actor. Call this
+    /// from your debounced auto-save; follow it with `try context.save()`.
+    ///
+    /// `DrawingSession` is a `Sendable` value type, so the copy handed to the
+    /// background task is fully isolated from further edits.
+    @MainActor
+    func save(_ session: DrawingSession) async {
+        let blob = await Task.detached(priority: .utility) {
+            session.serialized()
+        }.value
+        compressedData = blob
         modifiedAt = .now
     }
 }

@@ -306,17 +306,21 @@ typedef unsigned int swift_uint4  __attribute__((__ext_vector_type__(4)));
 
 @class NSCoder;
 /// High-performance stroke renderer.
-/// Strategy: committed strokes are <em>baked</em> into an offscreen bitmap
-/// (<code>CGContext</code>) exactly once. Each new input point strokes only the newly
-/// added segments into that bitmap and invalidates just their dirty rect, so
-/// per-frame cost is O(new segments) — constant — regardless of how many
-/// thousands of points the drawing contains. <code>draw(_:)</code> is a single bitmap
-/// blit. This comfortably sustains 120 Hz with coalesced touches.
-/// A full re-bake happens only on undo/redo/clear/load/resize — rare events
-/// where an O(total points) pass (still < 1 ms for typical drawings) is fine.
-/// No allocations occur on the hot input path: points append into
-/// pre-reserved contiguous arrays and segments are stroked with plain
-/// <code>CGContext</code> move/addLine calls (no CGPath / UIBezierPath objects).
+/// <em>Fixed logical canvas.</em> Strokes are stored and rendered in canvas-point
+/// coordinates (<code>session.canvasSize</code>), independent of the view’s size. The view
+/// aspect-fits the canvas into its bounds, so a drawing made on an iPad opens
+/// correctly on an iPhone — input is mapped view→canvas, output canvas→view.
+/// <em>Two buffers.</em> <code>committed</code> holds all finished strokes; <code>live</code> holds the
+/// in-progress stroke, drawn opaque and composited over <code>committed</code> with the
+/// brush’s alpha exactly once at present time. This gives correct translucency
+/// with no double-blended “beading” at sample points.
+/// <em>Zero per-frame copy.</em> Both buffers own their pixel memory and are
+/// presented as lightweight provider-backed <code>CGImage</code>s — no <code>makeImage()</code>
+/// snapshot copy on the draw path.
+/// <em>No allocations on the hot input path.</em> Each new point fills only its new
+/// joint (circle + quad) into <code>live</code>; a finished stroke is flattened into
+/// <code>committed</code> as a single filled ribbon. A full re-bake happens only on
+/// undo/redo/clear/load/resize.
 SWIFT_CLASS("_TtC10BlobCanvas16CanvasEngineView")
 @interface CanvasEngineView : NSView
 - (nonnull instancetype)initWithFrame:(CGRect)frame OBJC_DESIGNATED_INITIALIZER;

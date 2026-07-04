@@ -10,40 +10,118 @@ import AppKit
 public typealias PlatformView = NSView
 #endif
 
+// MARK: - Owned pixel buffer
+
+/// A bitmap whose pixel memory we own, so it can be presented every frame as a
+/// lightweight `CGImage` *without copying* (via a persistent `CGDataProvider`).
+/// This is the key to avoiding a full-buffer snapshot on the hot path — unlike
+/// `CGBitmapContext.makeImage()`, which copies the entire bitmap each call.
+///
+/// The context's user space is *canvas points* with a top-left origin, so all
+/// drawing happens in device-independent canvas coordinates.
+private final class CanvasBuffer {
+    let canvasSize: CGSize        // logical size in points (device-independent)
+    let scale: CGFloat            // backing pixels per point
+    let context: CGContext
+    private let provider: CGDataProvider
+    private let pixelWidth: Int
+    private let pixelHeight: Int
+    private let bytesPerRow: Int
+
+    init?(canvasSize: CGSize, scale: CGFloat) {
+        let w = max(1, Int((canvasSize.width * scale).rounded()))
+        let h = max(1, Int((canvasSize.height * scale).rounded()))
+        let bpr = w * 4
+        let byteCount = bpr * h
+        guard let data = calloc(byteCount, 1) else { return nil }
+
+        let space = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGImageAlphaInfo.premultipliedFirst.rawValue
+            | CGBitmapInfo.byteOrder32Little.rawValue
+        guard let ctx = CGContext(
+            data: data, width: w, height: h, bitsPerComponent: 8,
+            bytesPerRow: bpr, space: space, bitmapInfo: bitmapInfo
+        ) else { free(data); return nil }
+
+        // The provider owns `data` and frees it when the buffer is released.
+        guard let provider = CGDataProvider(
+            dataInfo: data, data: data, size: byteCount,
+            releaseData: { ptr, _, _ in free(ptr) }
+        ) else { free(data); return nil }
+
+        self.canvasSize = canvasSize
+        self.scale = scale
+        self.context = ctx
+        self.provider = provider
+        self.pixelWidth = w
+        self.pixelHeight = h
+        self.bytesPerRow = bpr
+
+        // Map canvas points → pixels with a top-left origin.
+        ctx.translateBy(x: 0, y: CGFloat(h))
+        ctx.scaleBy(x: scale, y: -scale)
+        ctx.setLineCap(.round)
+        ctx.setLineJoin(.round)
+        ctx.setShouldAntialias(true)
+    }
+
+    /// A zero-copy image over the live pixels. Cheap enough to build per frame:
+    /// it references the provider, no pixel data is duplicated.
+    func makeImage() -> CGImage? {
+        CGImage(
+            width: pixelWidth, height: pixelHeight,
+            bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: bytesPerRow,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedFirst.rawValue
+                | CGBitmapInfo.byteOrder32Little.rawValue),
+            provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent
+        )
+    }
+
+    func clear() {
+        context.clear(CGRect(origin: .zero, size: canvasSize))
+    }
+}
+
+// MARK: - Engine view
+
 /// High-performance stroke renderer.
 ///
-/// Strategy: committed strokes are *baked* into an offscreen bitmap
-/// (`CGContext`) exactly once. Each new input point strokes only the newly
-/// added segments into that bitmap and invalidates just their dirty rect, so
-/// per-frame cost is O(new segments) — constant — regardless of how many
-/// thousands of points the drawing contains. `draw(_:)` is a single bitmap
-/// blit. This comfortably sustains 120 Hz with coalesced touches.
+/// **Fixed logical canvas.** Strokes are stored and rendered in canvas-point
+/// coordinates (`session.canvasSize`), independent of the view's size. The view
+/// aspect-fits the canvas into its bounds, so a drawing made on an iPad opens
+/// correctly on an iPhone — input is mapped view→canvas, output canvas→view.
 ///
-/// A full re-bake happens only on undo/redo/clear/load/resize — rare events
-/// where an O(total points) pass (still < 1 ms for typical drawings) is fine.
+/// **Two buffers.** `committed` holds all finished strokes; `live` holds the
+/// in-progress stroke, drawn opaque and composited over `committed` with the
+/// brush's alpha exactly once at present time. This gives correct translucency
+/// with no double-blended "beading" at sample points.
 ///
-/// No allocations occur on the hot input path: points append into
-/// pre-reserved contiguous arrays and segments are stroked with plain
-/// `CGContext` move/addLine calls (no CGPath / UIBezierPath objects).
+/// **Zero per-frame copy.** Both buffers own their pixel memory and are
+/// presented as lightweight provider-backed `CGImage`s — no `makeImage()`
+/// snapshot copy on the draw path.
+///
+/// **No allocations on the hot input path.** Each new point fills only its new
+/// joint (circle + quad) into `live`; a finished stroke is flattened into
+/// `committed` as a single filled ribbon. A full re-bake happens only on
+/// undo/redo/clear/load/resize.
 public final class CanvasEngineView: PlatformView {
 
     // MARK: - Public state
 
-    /// The document being edited. Loading a new session re-bakes the bitmap.
     public private(set) var session = DrawingSession()
 
-    /// Brush for the *next* stroke.
     public var brushColor: StrokeColor = .black
     public var brushSize: Float = 8
 
     /// Fired after a stroke is committed or undo/redo/clear mutates history.
-    /// Hook your debounced auto-save here.
     public var onSessionChanged: ((DrawingSession) -> Void)?
 
-    // MARK: - Private rendering state
+    // MARK: - Private state
 
-    private var backing: CGContext?
-    private var backingScale: CGFloat = 1
+    private var committed: CanvasBuffer?
+    private var live: CanvasBuffer?
+    private var canvasSize: CGSize = CGSize(width: 1024, height: 768)
 
     private var liveStroke = Stroke()
     private var liveStrokeStartTime: CFTimeInterval = 0
@@ -62,10 +140,12 @@ public final class CanvasEngineView: PlatformView {
     }
 
     private func commonInit() {
+        canvasSize = CGSize(width: CGFloat(session.canvasSize.x), height: CGFloat(session.canvasSize.y))
         liveStroke.points.reserveCapacity(2048)
         #if canImport(UIKit)
         isMultipleTouchEnabled = false
         backgroundColor = .white
+        contentMode = .redraw
         #else
         wantsLayer = true
         layer?.backgroundColor = CGColor(gray: 1, alpha: 1)
@@ -80,7 +160,11 @@ public final class CanvasEngineView: PlatformView {
 
     public func load(_ session: DrawingSession) {
         self.session = session
-        rebake()
+        canvasSize = CGSize(width: CGFloat(session.canvasSize.x), height: CGFloat(session.canvasSize.y))
+        committed = nil
+        live = nil
+        ensureBuffers()
+        setNeedsFullDisplay()
     }
 
     @discardableResult
@@ -105,160 +189,218 @@ public final class CanvasEngineView: PlatformView {
         onSessionChanged?(session)
     }
 
-    // MARK: - Backing store
+    // MARK: - Buffers
 
-    private func ensureBacking() {
+    private func currentScale() -> CGFloat {
         #if canImport(UIKit)
-        let scale = window?.screen.scale ?? UIScreen.main.scale
+        let s = traitCollection.displayScale
+        return s > 0 ? s : (window?.screen.scale ?? 2)
         #else
-        let scale = window?.backingScaleFactor ?? 2
+        return window?.backingScaleFactor ?? 2
         #endif
-        let pixelW = Int(bounds.width * scale)
-        let pixelH = Int(bounds.height * scale)
-        guard pixelW > 0, pixelH > 0 else { return }
-        if let ctx = backing, ctx.width == pixelW, ctx.height == pixelH { return }
+    }
 
-        let ctx = CGContext(
-            data: nil,
-            width: pixelW,
-            height: pixelH,
-            bitsPerComponent: 8,
-            bytesPerRow: 0,
-            space: CGColorSpace(name: CGColorSpace.sRGB)!,
-            bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue
-                | CGBitmapInfo.byteOrder32Little.rawValue
-        )!
-        // Flip to top-left origin and scale so we can draw in view points.
-        ctx.translateBy(x: 0, y: CGFloat(pixelH))
-        ctx.scaleBy(x: scale, y: -scale)
-        ctx.setLineCap(.round)
-        ctx.setLineJoin(.round)
-        backing = ctx
-        backingScale = scale
-
-        session.canvasSize = SIMD2(Float(bounds.width), Float(bounds.height))
+    private func ensureBuffers() {
+        let scale = currentScale()
+        if let committed, committed.scale == scale, committed.canvasSize == canvasSize { return }
+        committed = CanvasBuffer(canvasSize: canvasSize, scale: scale)
+        live = CanvasBuffer(canvasSize: canvasSize, scale: scale)
         rebake()
     }
 
     #if canImport(UIKit)
     public override func layoutSubviews() {
         super.layoutSubviews()
-        ensureBacking()
+        ensureBuffers()
     }
     #else
     public override func layout() {
         super.layout()
-        ensureBacking()
+        ensureBuffers()
     }
     #endif
 
-    /// Full redraw of every committed stroke into the backing bitmap.
-    /// Only used for undo/redo/clear/load/resize.
+    /// Redraws every committed stroke into `committed`. Only on undo/redo/
+    /// clear/load/resize.
     private func rebake() {
-        guard let ctx = backing else { return }
-        ctx.clear(CGRect(origin: .zero, size: bounds.size))
+        guard let ctx = committed?.context else { return }
+        ctx.clear(CGRect(origin: .zero, size: canvasSize))
         for stroke in session.strokes {
-            bake(stroke, into: ctx)
+            fillRibbon(stroke, into: ctx, color: stroke.color)
         }
+        live?.clear()
         setNeedsFullDisplay()
     }
 
-    private func bake(_ stroke: Stroke, into ctx: CGContext) {
-        let points = stroke.points
-        guard let first = points.first else { return }
-        ctx.setStrokeColor(stroke.color.cgColor)
+    // MARK: - Canvas ↔ view transform (aspect-fit, centered)
 
-        if points.count == 1 {
-            fillDot(at: first, stroke: stroke, in: ctx)
-            return
-        }
-        for i in 1..<points.count {
-            strokeSegment(from: points[i - 1], to: points[i], stroke: stroke, in: ctx)
-        }
+    private func fit() -> (origin: CGPoint, scale: CGFloat) {
+        guard canvasSize.width > 0, canvasSize.height > 0 else { return (.zero, 1) }
+        let s = min(bounds.width / canvasSize.width, bounds.height / canvasSize.height)
+        let drawn = CGSize(width: canvasSize.width * s, height: canvasSize.height * s)
+        let origin = CGPoint(x: (bounds.width - drawn.width) * 0.5,
+                             y: (bounds.height - drawn.height) * 0.5)
+        return (origin, s)
     }
 
-    /// Strokes one segment. Pressure modulates width per segment, which is why
-    /// segments are stroked individually rather than as one path.
-    private func strokeSegment(from a: StrokePoint, to b: StrokePoint, stroke: Stroke, in ctx: CGContext) {
-        let width = CGFloat(stroke.brushSize) * CGFloat((a.pressure + b.pressure) * 0.5)
-        ctx.setLineWidth(max(width, 0.5))
-        ctx.move(to: a.cgPoint)
-        ctx.addLine(to: b.cgPoint)
-        ctx.strokePath()
+    private func viewToCanvas(_ p: CGPoint) -> CGPoint {
+        let f = fit()
+        guard f.scale > 0 else { return p }
+        return CGPoint(
+            x: min(max((p.x - f.origin.x) / f.scale, 0), canvasSize.width),
+            y: min(max((p.y - f.origin.y) / f.scale, 0), canvasSize.height)
+        )
     }
 
-    private func fillDot(at p: StrokePoint, stroke: Stroke, in ctx: CGContext) {
-        let r = CGFloat(stroke.brushSize) * CGFloat(p.pressure) * 0.5
-        ctx.setFillColor(stroke.color.cgColor)
-        ctx.fillEllipse(in: CGRect(x: CGFloat(p.x) - r, y: CGFloat(p.y) - r, width: r * 2, height: r * 2))
+    private func canvasRectToView(_ r: CGRect) -> CGRect {
+        let f = fit()
+        return CGRect(x: r.origin.x * f.scale + f.origin.x,
+                      y: r.origin.y * f.scale + f.origin.y,
+                      width: r.width * f.scale, height: r.height * f.scale)
+    }
+
+    // MARK: - Ribbon geometry (canvas space)
+
+    private func halfWidth(_ p: StrokePoint, _ stroke: Stroke) -> CGFloat {
+        max(CGFloat(stroke.brushSize) * CGFloat(p.pressure) * 0.5, 0.25)
+    }
+
+    /// Adds the round dot for a single point.
+    private func addDot(_ path: CGMutablePath, at p: StrokePoint, radius r: CGFloat) {
+        path.addEllipse(in: CGRect(x: CGFloat(p.x) - r, y: CGFloat(p.y) - r, width: r * 2, height: r * 2))
+    }
+
+    /// Adds the trapezoid connecting two variable-radius points.
+    private func addQuad(_ path: CGMutablePath, from a: StrokePoint, to b: StrokePoint, ra: CGFloat, rb: CGFloat) {
+        let dx = CGFloat(b.x - a.x), dy = CGFloat(b.y - a.y)
+        let len = (dx * dx + dy * dy).squareRoot()
+        guard len > 1e-4 else { return }
+        let nx = -dy / len, ny = dx / len
+        path.move(to: CGPoint(x: CGFloat(a.x) + nx * ra, y: CGFloat(a.y) + ny * ra))
+        path.addLine(to: CGPoint(x: CGFloat(b.x) + nx * rb, y: CGFloat(b.y) + ny * rb))
+        path.addLine(to: CGPoint(x: CGFloat(b.x) - nx * rb, y: CGFloat(b.y) - ny * rb))
+        path.addLine(to: CGPoint(x: CGFloat(a.x) - nx * ra, y: CGFloat(a.y) - ny * ra))
+        path.closeSubpath()
+    }
+
+    /// Flattens a whole stroke into a single `fillPath`. One fill = one coverage
+    /// pass, so self-overlaps never double-blend even for translucent colors.
+    private func fillRibbon(_ stroke: Stroke, into ctx: CGContext, color: StrokeColor) {
+        let pts = stroke.points
+        guard let first = pts.first else { return }
+        let path = CGMutablePath()
+        if pts.count == 1 {
+            addDot(path, at: first, radius: halfWidth(first, stroke))
+        } else {
+            var prevR = halfWidth(first, stroke)
+            addDot(path, at: first, radius: prevR)
+            for i in 1..<pts.count {
+                let r = halfWidth(pts[i], stroke)
+                addDot(path, at: pts[i], radius: r)
+                addQuad(path, from: pts[i - 1], to: pts[i], ra: prevR, rb: r)
+                prevR = r
+            }
+        }
+        ctx.setFillColor(color.cgColor)
+        ctx.addPath(path)
+        ctx.fillPath()
     }
 
     // MARK: - Live input (hot path)
 
-    private func beginStroke(at point: CGPoint, pressure: CGFloat) {
+    private func beginStroke(atCanvas p: CGPoint, pressure: CGFloat) {
+        ensureBuffers()
         liveStroke = Stroke(points: [], color: brushColor, brushSize: brushSize)
         liveStroke.points.reserveCapacity(2048)
         liveStrokeStartTime = CACurrentMediaTime()
         isStroking = true
-        appendLivePoint(point, pressure: pressure)
+        appendLivePoint(atCanvas: p, pressure: pressure)
     }
 
-    /// Appends one point and incrementally strokes only the new segment.
-    private func appendLivePoint(_ point: CGPoint, pressure: CGFloat) {
-        guard isStroking, let ctx = backing else { return }
+    /// Appends one point and incrementally fills only its new joint into `live`
+    /// (opaque — alpha is applied once at present time).
+    private func appendLivePoint(atCanvas point: CGPoint, pressure: CGFloat) {
+        guard isStroking, let live else { return }
         let p = StrokePoint(
-            x: point.x,
-            y: point.y,
-            pressure: pressure,
+            x: point.x, y: point.y, pressure: pressure,
             timestamp: Float(CACurrentMediaTime() - liveStrokeStartTime)
         )
 
-        ctx.setStrokeColor(liveStroke.color.cgColor)
+        var opaque = liveStroke.color
+        opaque.a = 255
+        let ctx = live.context
+        ctx.setFillColor(opaque.cgColor)
+
+        let r = halfWidth(p, liveStroke)
         let dirty: CGRect
+        let path = CGMutablePath()
         if let last = liveStroke.points.last {
-            // Skip sub-quarter-point movement — invisible and wastes storage.
             let dx = p.x - last.x, dy = p.y - last.y
-            guard dx * dx + dy * dy > 0.0625 else { return }
-            strokeSegment(from: last, to: p, stroke: liveStroke, in: ctx)
+            guard dx * dx + dy * dy > 0.0625 else { return } // skip sub-quarter-point moves
+            let lastR = halfWidth(last, liveStroke)
+            addDot(path, at: p, radius: r)
+            addQuad(path, from: last, to: p, ra: lastR, rb: r)
             dirty = CGRect(x: CGFloat(min(last.x, p.x)), y: CGFloat(min(last.y, p.y)),
                            width: CGFloat(abs(dx)), height: CGFloat(abs(dy)))
         } else {
-            fillDot(at: p, stroke: liveStroke, in: ctx)
+            addDot(path, at: p, radius: r)
             dirty = CGRect(x: point.x, y: point.y, width: 0, height: 0)
         }
+        ctx.addPath(path)
+        ctx.fillPath()
         liveStroke.points.append(p)
 
         let pad = CGFloat(liveStroke.brushSize) + 2
-        setNeedsDisplay(dirty.insetBy(dx: -pad, dy: -pad))
+        setNeedsDisplay(canvasRectToView(dirty).insetBy(dx: -pad * fit().scale, dy: -pad * fit().scale))
     }
 
     private func endStroke() {
         guard isStroking else { return }
         isStroking = false
+        if !liveStroke.points.isEmpty, let committed {
+            // Authoritative render: single filled ribbon with the real alpha.
+            fillRibbon(liveStroke, into: committed.context, color: liveStroke.color)
+        }
+        live?.clear()
         session.commit(liveStroke)
+        setNeedsFullDisplay()
         onSessionChanged?(session)
     }
 
-    // MARK: - Blit
+    // MARK: - Present
 
     #if canImport(UIKit)
     public override func draw(_ rect: CGRect) {
-        blit(into: UIGraphicsGetCurrentContext(), rect: rect)
+        present(into: UIGraphicsGetCurrentContext())
     }
     #else
     public override func draw(_ dirtyRect: NSRect) {
-        blit(into: NSGraphicsContext.current?.cgContext, rect: dirtyRect)
+        present(into: NSGraphicsContext.current?.cgContext)
     }
     #endif
 
-    private func blit(into target: CGContext?, rect: CGRect) {
-        guard let target, let image = backing?.makeImage() else { return }
-        target.saveGState()
-        // makeImage() is bottom-left origin; flip once to view space.
-        target.translateBy(x: 0, y: bounds.height)
-        target.scaleBy(x: 1, y: -1)
-        target.draw(image, in: CGRect(origin: .zero, size: bounds.size))
-        target.restoreGState()
+    private func present(into target: CGContext?) {
+        guard let target else { return }
+        let f = fit()
+        let rect = CGRect(origin: f.origin,
+                          size: CGSize(width: canvasSize.width * f.scale,
+                                       height: canvasSize.height * f.scale))
+        if let image = committed?.makeImage() {
+            drawUpright(image, in: rect, into: target, alpha: 1)
+        }
+        if isStroking, let image = live?.makeImage() {
+            drawUpright(image, in: rect, into: target, alpha: CGFloat(liveStroke.color.a) / 255)
+        }
+    }
+
+    /// Draws a top-origin `CGImage` upright into `rect`, with `alpha`.
+    private func drawUpright(_ image: CGImage, in rect: CGRect, into ctx: CGContext, alpha: CGFloat) {
+        ctx.saveGState()
+        ctx.setAlpha(alpha)
+        ctx.translateBy(x: rect.minX, y: rect.minY + rect.height)
+        ctx.scaleBy(x: 1, y: -1)
+        ctx.draw(image, in: CGRect(origin: .zero, size: rect.size))
+        ctx.restoreGState()
     }
 
     private func setNeedsFullDisplay() {
@@ -276,7 +418,7 @@ public final class CanvasEngineView: PlatformView {
 extension CanvasEngineView {
     public override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard let touch = touches.first else { return }
-        beginStroke(at: touch.location(in: self), pressure: normalizedForce(touch))
+        beginStroke(atCanvas: viewToCanvas(touch.location(in: self)), pressure: normalizedForce(touch))
     }
 
     public override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
@@ -284,13 +426,13 @@ extension CanvasEngineView {
         // Coalesced touches deliver the full 120/240 Hz sample stream even
         // when the display refreshes slower — critical for smooth curves.
         for t in event?.coalescedTouches(for: touch) ?? [touch] {
-            appendLivePoint(t.location(in: self), pressure: normalizedForce(t))
+            appendLivePoint(atCanvas: viewToCanvas(t.location(in: self)), pressure: normalizedForce(t))
         }
     }
 
     public override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
         if let touch = touches.first {
-            appendLivePoint(touch.location(in: self), pressure: normalizedForce(touch))
+            appendLivePoint(atCanvas: viewToCanvas(touch.location(in: self)), pressure: normalizedForce(touch))
         }
         endStroke()
     }
@@ -310,15 +452,15 @@ extension CanvasEngineView {
 #if canImport(AppKit)
 extension CanvasEngineView {
     public override func mouseDown(with event: NSEvent) {
-        beginStroke(at: convert(event.locationInWindow, from: nil), pressure: pressure(of: event))
+        beginStroke(atCanvas: viewToCanvas(convert(event.locationInWindow, from: nil)), pressure: pressure(of: event))
     }
 
     public override func mouseDragged(with event: NSEvent) {
-        appendLivePoint(convert(event.locationInWindow, from: nil), pressure: pressure(of: event))
+        appendLivePoint(atCanvas: viewToCanvas(convert(event.locationInWindow, from: nil)), pressure: pressure(of: event))
     }
 
     public override func mouseUp(with event: NSEvent) {
-        appendLivePoint(convert(event.locationInWindow, from: nil), pressure: pressure(of: event))
+        appendLivePoint(atCanvas: viewToCanvas(convert(event.locationInWindow, from: nil)), pressure: pressure(of: event))
         endStroke()
     }
 

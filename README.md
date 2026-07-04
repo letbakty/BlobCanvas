@@ -31,10 +31,12 @@ DrawingBlobCodec (flat binary + LZFSE)
 
 ## Why it's fast
 
-- **Incremental rendering.** Committed pixels are baked into an offscreen `CGContext` once. Each new input point strokes only its new segment and invalidates just that dirty rect; `draw(_:)` is a single bitmap blit. Per-frame cost is constant regardless of total point count — thousands of points render at 60/120 FPS.
-- **No allocations on the hot path.** Points are 16-byte value types appended into pre-reserved contiguous arrays; segments are drawn with raw `CGContext` move/addLine calls (no `CGPath`/`UIBezierPath` objects). Full re-bake happens only on undo/redo/clear/load/resize.
+- **Two-buffer incremental rendering.** `committed` holds all finished strokes; `live` holds the in-progress stroke. Each new point fills only its new joint into `live` and invalidates just that dirty rect. On commit the stroke is flattened into `committed` as a single filled ribbon. Per-frame cost is constant regardless of total point count.
+- **Zero per-frame copy.** Both buffers own their pixel memory and are presented as lightweight `CGImage`s over a persistent `CGDataProvider` — no `makeImage()` snapshot copy on the draw path.
+- **Correct translucency.** A stroke is rendered as one `fillPath`, so self-overlaps never double-blend; translucent brushes stay uniform with no beading at sample points. The live stroke is drawn opaque and composited once with the brush's alpha at present time.
+- **Fixed logical canvas.** Strokes live in device-independent canvas coordinates; the view aspect-fits them into its bounds, so a drawing opens identically on any screen size.
 - **Coalesced touches** on iOS deliver the full 120/240 Hz sample stream even between display refreshes.
-- **Bulk binary serialization.** `[StrokePoint]` is memcpy'd directly into the payload (no per-point Codable overhead), then LZFSE-compressed. A 10k-point drawing encodes in ~1.5 ms into ~14 KB.
+- **Bulk binary serialization.** `[StrokePoint]` is memcpy'd directly into the payload (no per-point Codable overhead), then LZFSE-compressed off the main actor via `drawing.save(session)`. Encoding 10k points takes ~1.5 ms.
 
 ## Usage
 
@@ -62,8 +64,10 @@ struct EaselView: View {
         .onAppear {
             // Debounced auto-save: history changes never touch the store directly.
             controller.onSessionChanged = { session in
-                drawing.save(session)             // re-encode blob + bump modifiedAt
-                try? context.save()
+                Task {
+                    await drawing.save(session)   // encode blob off-main, bump modifiedAt
+                    try? context.save()
+                }
             }
         }
     }

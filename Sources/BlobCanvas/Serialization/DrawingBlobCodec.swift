@@ -3,7 +3,11 @@ import Compression
 
 /// Flat binary codec for `DrawingSession` → single `Data` blob.
 ///
-/// Layout (all little-endian, the native byte order on every Apple platform):
+/// Header scalars are written explicitly little-endian. The point arrays are
+/// bulk-copied in host byte order, which is little-endian on every Apple
+/// platform — so on the platforms this package targets the whole blob is
+/// little-endian. (A big-endian host would need the point copy byte-swapped;
+/// none exist for iOS/macOS, so we keep the fast bulk copy.)
 ///
 /// ```
 /// Outer container:
@@ -24,20 +28,29 @@ import Compression
 ///                copied in bulk from the contiguous [StrokePoint] buffer)
 /// ```
 ///
-/// A 10k-point drawing is ~160 KB raw and typically 40–80 KB after LZFSE —
-/// versus thousands of rows in a relational model.
+/// A 10k-point drawing is ~160 KB raw. LZFSE shrinks smooth strokes a lot but
+/// real jittery input compresses less (float32 mantissas are high-entropy);
+/// expect roughly a 2–5× reduction on hand-drawn data.
 public enum DrawingBlobCodec {
 
-    public enum CodecError: Error {
+    public enum CodecError: Error, Equatable {
         case badMagic
         case unsupportedVersion(UInt16)
         case truncated
         case decompressionFailed
+        /// A declared point/stroke count that exceeds `pointSanityLimit`,
+        /// indicating a corrupt or hostile blob.
+        case implausibleCount
     }
 
     static let magic: [UInt8] = [0x42, 0x4C, 0x42, 0x43] // "BLBC"
     static let version: UInt16 = 1
     static let pointStride = MemoryLayout<StrokePoint>.stride // 16
+
+    /// Upper bound on points in one stroke, guarding against a corrupt length
+    /// field driving a huge allocation. 64M points ≈ 1 GB raw — well beyond any
+    /// real drawing, but bounded.
+    static let pointSanityLimit: UInt32 = 64 * 1024 * 1024
 
     // MARK: - Encode
 
@@ -102,6 +115,8 @@ public enum DrawingBlobCodec {
         let w: Float = try body.readLE()
         let h: Float = try body.readLE()
         let strokeCount: UInt32 = try body.readLE()
+        // A stroke count can't exceed the point limit (each stroke has ≥1 point).
+        guard strokeCount <= pointSanityLimit else { throw CodecError.implausibleCount }
 
         var strokes: [Stroke] = []
         strokes.reserveCapacity(Int(strokeCount))
@@ -115,6 +130,7 @@ public enum DrawingBlobCodec {
             )
             let brushSize: Float = try body.readLE()
             let pointCount: UInt32 = try body.readLE()
+            guard pointCount <= pointSanityLimit else { throw CodecError.implausibleCount }
 
             let byteCount = Int(pointCount) * pointStride
             let pointBytes = try body.readBytes(byteCount)
