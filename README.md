@@ -24,9 +24,11 @@ DrawingBlobCodec (flat binary + LZFSE)
 | `StrokePoint` | [StrokePoint.swift](Sources/BlobCanvas/Models/StrokePoint.swift) | 16-byte POD point (x, y, pressure, timestamp) |
 | `Stroke` / `StrokeColor` | [Stroke.swift](Sources/BlobCanvas/Models/Stroke.swift) | Point run + RGBA color + brush size |
 | `DrawingSession` | [DrawingSession.swift](Sources/BlobCanvas/Models/DrawingSession.swift) | In-memory state, O(1) undo/redo stacks |
-| `DrawingBlobCodec` | [DrawingBlobCodec.swift](Sources/BlobCanvas/Serialization/DrawingBlobCodec.swift) | Delta+quantized binary (v3) + LZFSE; v1/v2 decode |
+| `DrawingBlobCodec` | [DrawingBlobCodec.swift](Sources/BlobCanvas/Serialization/DrawingBlobCodec.swift) | Delta+quantized binary (v4, layers) + LZFSE; v1–v3 decode |
 | `Drawing` | [Drawing.swift](Sources/BlobCanvas/Persistence/Drawing.swift) | SwiftData `@Model` holding the blob + metadata |
-| `StrokeRasterizer` | [StrokeRasterizer.swift](Sources/BlobCanvas/Rendering/StrokeRasterizer.swift) | Pure ribbon geometry: smoothing, velocity width, blend modes |
+| `Layer` | [Layer.swift](Sources/BlobCanvas/Models/Layer.swift) | Named group of strokes with opacity + visibility |
+| `StrokeRasterizer` | [StrokeRasterizer.swift](Sources/BlobCanvas/Rendering/StrokeRasterizer.swift) | Pure geometry: smoothing, velocity width, blend modes, layer compositing |
+| `CanvasViewport` | [CanvasViewport.swift](Sources/BlobCanvas/Rendering/CanvasViewport.swift) | Testable canvas↔view transform with zoom/pan |
 | `DrawingExporter` | [DrawingExporter.swift](Sources/BlobCanvas/Rendering/DrawingExporter.swift) | PNG / PDF / SVG / thumbnail export |
 | `DrawingPlayer` | [DrawingPlayer.swift](Sources/BlobCanvas/Rendering/DrawingPlayer.swift) | Timestamp-driven replay of drawing creation |
 | `CanvasEngineView` | [CanvasEngineView.swift](Sources/BlobCanvas/Views/CanvasEngineView.swift) | Bitmap-backed renderer, UIKit/AppKit input |
@@ -34,12 +36,22 @@ DrawingBlobCodec (flat binary + LZFSE)
 
 ## Brushes & features
 
+- **Layers.** `controller.addLayer()` / `setLayerOpacity` / `setLayerVisible` / `setActiveLayer`. Undo/redo is per active layer; erasers are layer-local (they only clear within their own layer).
 - **Blend modes.** `brushBlendMode = .erase` clears pixels in real time; erasers persist as strokes (undoable).
 - **Width dynamics.** `brushDynamics` is `.pressure` (default), `.velocity` (faster = thinner, calligraphic), or `.constant`.
 - **Smoothing.** Committed strokes are Catmull-Rom interpolated (`smoothing`), while the live preview stays polyline for latency.
 - **Palm rejection.** `pencilOnly = true` draws only from Apple Pencil, ignoring finger/palm touches.
+- **Zoom & pan.** Pinch + two-finger pan (iOS), trackpad magnify + scroll (macOS), or programmatic `zoom(by:at:)` / `pan(by:)` / `resetZoom()`.
 - **Export.** `DrawingExporter.pngData / pdfData / svgString / thumbnailPNG`.
 - **Replay.** `DrawingPlayer(session).snapshot(at:)` reconstructs the drawing at any point in its creation from the captured timestamps.
+
+## Not yet (deliberately deferred)
+
+These need on-device verification or a large rewrite and would regress quality if shipped half-done:
+
+- **Metal / `CAMetalLayer` backend.** The Core Graphics path meets 120 FPS for the target canvas sizes; a GPU renderer at full feature parity (single-coverage translucency, smoothing, eraser, layers, AA) is a dedicated effort.
+- **IOSurface presentation & canvas tiling** — for very large canvases; the current owned-buffer + provider path already avoids per-frame copies at normal sizes.
+- **Append-only incremental save** — async + debounced `save` already keep encoding off the main thread; append framing is a narrower win with real format complexity.
 
 ## Why it's fast
 
