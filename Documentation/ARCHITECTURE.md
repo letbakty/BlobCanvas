@@ -138,4 +138,6 @@ Versions (all still decodable — `decode` dispatches per version):
 
 ## Improvements / known gaps
 
-See the "Final research" list — top items: raster zoom is blurry (buffers are fit-resolution), Metal `.shared` render target won't work on Intel discrete GPUs, the incremental encoder keys layers by index (fragile if layer insert/reorder is added), undo is O(n) rebake, Metal is offscreen-only, and color is sRGB-only (no Display P3).
+Recently closed: crisp zoom (canvas re-baked at the zoom's resolution, capped by `maxBackingPixels`), O(1) undo (opt-in `undoCheckpointDepth` pixel-checkpoint ring, rebake fallback), Intel-safe Metal read-back (render `.private` → blit → shared buffer), incremental encoder keyed by `Layer.id` (insert/reorder-safe), Metal smoothing + radius-scaled caps, Display P3 export.
+
+Still open, all device-bound: live `CAMetalLayer` view path (offscreen `MetalSessionRenderer` is the foundation), IOSurface presentation, canvas tiling. The Metal path also lacks per-stroke single-coverage translucency and layer group opacity — opaque strokes match the CG renderer; translucent ones can double-blend.

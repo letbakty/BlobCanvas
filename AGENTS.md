@@ -69,4 +69,6 @@ Tests/BlobCanvasTests/  codec, fuzz, incremental, rasterizer/Metal golden, layer
 
 ## Known limitations (see ARCHITECTURE.md "Improvements")
 
-Zoom scales the raster (blurry when zoomed in); undo is O(n) rebake (redo is O(1)); Metal is offscreen-only (no live `CAMetalLayer`), `.shared` render target won't work on Intel discrete GPUs; sRGB only (no P3); incremental encoder keys layers by index (fragile if layer insert/reorder is ever added).
+Remaining, all inherently device-bound: Metal is offscreen-only (no live `CAMetalLayer` view path); no IOSurface presentation or canvas tiling for very large canvases. The Metal renderer still lacks per-stroke single-coverage translucency and group opacity (opaque strokes match CG; smoothing/eraser/blend do). Display P3 is export-only; the live view renders sRGB.
+
+Already addressed (don't re-report): crisp zoom (re-bake at zoom resolution, pixel-budget capped), O(1) undo via opt-in `undoCheckpointDepth`, Intel-safe Metal blit read-back, layer frames keyed by `Layer.id`, Metal Catmull-Rom smoothing + radius-scaled caps, multi-layer eraser preview safety.
