@@ -112,12 +112,104 @@ public enum DrawingBlobCodec {
         let fileVersion: UInt16 = try reader.readLE()
 
         switch fileVersion {
+        case 5: return try decodeV5(payload: decompressPayload(&reader))
         case 4: return try decodeV4(payload: decompressPayload(&reader))
         case 3: return try decodeSingleLayer(payload: decompressPayload(&reader), hasFlags: true)
         case 2: return try decodeSingleLayer(payload: decompressPayload(&reader), hasFlags: false)
         case 1: return try decodeV1(payload: decompressPayload(&reader))
         default: throw CodecError.unsupportedVersion(fileVersion)
         }
+    }
+
+    /// v5 (incremental log): per-layer, strokes stored as one or more
+    /// independently-compressed frames so a save can append only new strokes.
+    private static func decodeV5(payload: Data) throws -> DrawingSession {
+        var body = Reader(payload)
+        let w: Float = try body.readLE()
+        let h: Float = try body.readLE()
+        let activeIndex = try body.readVarint()
+        let layerCount = try body.readVarint()
+        guard layerCount <= pointSanityLimit else { throw CodecError.implausibleCount }
+
+        var layers: [Layer] = []
+        layers.reserveCapacity(Int(layerCount))
+        for _ in 0..<layerCount {
+            let name = try readString(&body)
+            let opacity: Float = try body.readLE()
+            let isVisible = try body.readByte() != 0
+            let frameCount = try body.readVarint()
+            guard frameCount <= pointSanityLimit else { throw CodecError.implausibleCount }
+
+            var strokes: [Stroke] = []
+            for _ in 0..<frameCount {
+                let len = try body.readVarint()
+                let frame = try body.readBytes(Int(len))
+                strokes.append(contentsOf: try decodeFrame(frame))
+            }
+            layers.append(Layer(name: name, strokes: strokes, opacity: opacity, isVisible: isVisible))
+        }
+        return DrawingSession(canvasSize: SIMD2(w, h), layers: layers,
+                              activeLayerIndex: Int(min(activeIndex, UInt64(Int.max))))
+    }
+
+    // MARK: - Frames (incremental)
+
+    /// Encodes a run of strokes as a self-contained, optionally-LZFSE-compressed
+    /// frame: `[algo UInt8][ (compressed) varint(strokeCount) + strokes ]`.
+    static func encodeFrame<S: Sequence>(_ strokes: S, count: Int) -> Data where S.Element == Stroke {
+        var raw = Data()
+        raw.appendVarint(UInt64(count))
+        for stroke in strokes { appendStroke(stroke, to: &raw) }
+
+        var frame = Data()
+        if let compressed = try? (raw as NSData).compressed(using: .lzfse), compressed.count < raw.count {
+            frame.append(1)
+            frame.append(compressed as Data)
+        } else {
+            frame.append(0)
+            frame.append(raw)
+        }
+        return frame
+    }
+
+    private static func decodeFrame(_ frame: Data) throws -> [Stroke] {
+        var reader = Reader(frame)
+        let algorithm = try reader.readByte()
+        let body: Data
+        switch algorithm {
+        case 0: body = try reader.remainder()
+        case 1:
+            let compressed = try reader.remainder()
+            guard let raw = try? (compressed as NSData).decompressed(using: .lzfse) else {
+                throw CodecError.decompressionFailed
+            }
+            body = raw as Data
+        default: throw CodecError.decompressionFailed
+        }
+        var r = Reader(body)
+        return try readStrokes(&r, hasFlags: true)
+    }
+
+    /// Assembles a v5 container from already-encoded per-layer frames.
+    static func assembleV5(canvasSize: SIMD2<Float>, activeLayerIndex: Int,
+                           layers: [(name: String, opacity: Float, isVisible: Bool, frames: [Data])]) -> Data {
+        var payload = Data()
+        payload.appendLE(canvasSize.x)
+        payload.appendLE(canvasSize.y)
+        payload.appendVarint(UInt64(max(activeLayerIndex, 0)))
+        payload.appendVarint(UInt64(layers.count))
+        for layer in layers {
+            appendString(layer.name, to: &payload)
+            payload.appendLE(layer.opacity)
+            payload.append(layer.isVisible ? 1 : 0)
+            payload.appendVarint(UInt64(layer.frames.count))
+            for frame in layer.frames {
+                payload.appendVarint(UInt64(frame.count))
+                payload.append(frame)
+            }
+        }
+        // Frames carry their own compression; the container is stored raw.
+        return wrap(payload, version: 5, compress: false)
     }
 
     private static func decodeV4(payload: Data) throws -> DrawingSession {

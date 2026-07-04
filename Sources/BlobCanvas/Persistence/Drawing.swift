@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 import SwiftData
 
 /// SwiftData record for one drawing.
@@ -18,6 +19,10 @@ public final class Drawing {
     /// The full `DrawingSession`, encoded by `DrawingBlobCodec` (LZFSE).
     @Attribute(.externalStorage) public var compressedData: Data
 
+    /// Small PNG preview for gallery lists — avoids decoding+rendering the whole
+    /// drawing just to show a cell. Spilled to external storage like the blob.
+    @Attribute(.externalStorage) public var thumbnailData: Data?
+
     public init(
         id: UUID = UUID(),
         title: String = "Untitled",
@@ -29,6 +34,7 @@ public final class Drawing {
         self.createdAt = now
         self.modifiedAt = now
         self.compressedData = session.serialized()
+        self.thumbnailData = nil
     }
 }
 
@@ -60,6 +66,19 @@ public extension Drawing {
             session.serialized()
         }.value
         compressedData = blob
+        modifiedAt = .now
+    }
+
+    /// Encodes the blob *and* regenerates the thumbnail off the main actor, then
+    /// assigns both back. Use when you also want the gallery preview refreshed.
+    @MainActor
+    func save(_ session: DrawingSession, thumbnailMaxDimension: CGFloat) async {
+        let (blob, thumb) = await Task.detached(priority: .utility) {
+            (session.serialized(),
+             DrawingExporter.thumbnailPNG(session, maxDimension: thumbnailMaxDimension))
+        }.value
+        compressedData = blob
+        thumbnailData = thumb
         modifiedAt = .now
     }
 }

@@ -209,7 +209,16 @@ public final class CanvasEngineView: PlatformView {
     @discardableResult
     public func redo() -> Bool {
         guard session.redo() else { return false }
-        rebake()
+        // Fast path: the restored stroke can be drawn straight on top when the
+        // active layer is topmost/opaque and the stroke isn't an eraser — no
+        // need to re-composite everything.
+        if let stroke = session.strokes.last, stroke.blendMode == .normal,
+           session.activeLayerIsTopOpaque, let committed {
+            StrokeRasterizer.draw(stroke, into: committed.context, smoothing: smoothing)
+            setNeedsFullDisplay()
+        } else {
+            rebake()
+        }
         onSessionChanged?(session)
         return true
     }
