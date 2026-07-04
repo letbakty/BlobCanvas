@@ -25,6 +25,14 @@ public struct StrokeColor: Hashable, Sendable {
             alpha: CGFloat(a) / 255
         )
     }
+
+    /// CGColor interpreting the RGBA components in `space` — pass a Display P3
+    /// space to paint into a wide-gamut context (the same encoded values then
+    /// span the wider gamut). Falls back to sRGB if construction fails.
+    public func cgColor(in space: CGColorSpace) -> CGColor {
+        CGColor(colorSpace: space,
+                components: [CGFloat(r) / 255, CGFloat(g) / 255, CGFloat(b) / 255, CGFloat(a) / 255]) ?? cgColor
+    }
 }
 
 /// How a stroke composites onto what is already drawn.

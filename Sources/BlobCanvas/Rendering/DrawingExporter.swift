@@ -10,8 +10,12 @@ public enum DrawingExporter {
     // MARK: - Raster
 
     /// PNG at the given scale, optionally over a background (nil = transparent).
-    public static func pngData(_ session: DrawingSession, scale: CGFloat = 2, background: StrokeColor? = nil) -> Data? {
-        guard let image = StrokeRasterizer.makeImage(session, scale: scale, background: background) else { return nil }
+    /// Set `wideGamut` to render into Display P3 for wide-gamut displays.
+    public static func pngData(_ session: DrawingSession, scale: CGFloat = 2,
+                               background: StrokeColor? = nil, wideGamut: Bool = false) -> Data? {
+        let space = wideGamut ? StrokeRasterizer.displayP3 : StrokeRasterizer.colorSpace
+        guard let image = StrokeRasterizer.makeImage(session, scale: scale, background: background, colorSpace: space)
+        else { return nil }
         return pngData(from: image)
     }
 

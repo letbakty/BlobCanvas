@@ -11,6 +11,9 @@ public enum StrokeRasterizer {
     /// sRGB — matches `StrokeColor.cgColor` so buffers and colors agree.
     public static let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
 
+    /// Wide-gamut space for export into Display P3 (see `makeImage(…colorSpace:)`).
+    public static let displayP3 = CGColorSpace(name: CGColorSpace.displayP3)!
+
     // MARK: - Width
 
     /// Half-width at a point, given its neighbor for velocity. Stateless for
@@ -146,17 +149,20 @@ public enum StrokeRasterizer {
     // MARK: - Drawing
 
     /// Draws one stroke into `ctx`, honoring blend mode and width dynamics.
-    public static func draw(_ stroke: Stroke, into ctx: CGContext, smoothing: Bool = true) {
+    /// `space` interprets stroke colors (sRGB by default; pass `displayP3` for a
+    /// wide-gamut context).
+    public static func draw(_ stroke: Stroke, into ctx: CGContext, smoothing: Bool = true,
+                            colorSpace space: CGColorSpace = colorSpace) {
         guard !stroke.points.isEmpty else { return }
         let path = ribbonPath(for: stroke, smoothing: smoothing)
         ctx.saveGState()
         switch stroke.blendMode {
         case .normal:
             ctx.setBlendMode(.normal)
-            ctx.setFillColor(stroke.color.cgColor)
+            ctx.setFillColor(stroke.color.cgColor(in: space))
         case .erase:
             ctx.setBlendMode(.clear)
-            ctx.setFillColor(StrokeColor.black.cgColor)
+            ctx.setFillColor(StrokeColor.black.cgColor(in: space))
         }
         ctx.addPath(path)
         ctx.fillPath()
@@ -167,18 +173,19 @@ public enum StrokeRasterizer {
     /// bottom-up. Layers that need isolation — non-opaque, or containing an
     /// eraser (so `.clear` only affects that layer, not the ones beneath) — are
     /// drawn inside a transparency group; opaque plain layers draw directly.
-    public static func render(_ session: DrawingSession, into ctx: CGContext, smoothing: Bool = true) {
+    public static func render(_ session: DrawingSession, into ctx: CGContext, smoothing: Bool = true,
+                              colorSpace space: CGColorSpace = colorSpace) {
         for layer in session.layers where layer.isVisible && !layer.strokes.isEmpty {
             let needsGroup = layer.opacity < 0.999 || layer.strokes.contains { $0.blendMode == .erase }
             if needsGroup {
                 ctx.saveGState()
                 ctx.setAlpha(CGFloat(layer.opacity))
                 ctx.beginTransparencyLayer(auxiliaryInfo: nil)
-                for stroke in layer.strokes { draw(stroke, into: ctx, smoothing: smoothing) }
+                for stroke in layer.strokes { draw(stroke, into: ctx, smoothing: smoothing, colorSpace: space) }
                 ctx.endTransparencyLayer()
                 ctx.restoreGState()
             } else {
-                for stroke in layer.strokes { draw(stroke, into: ctx, smoothing: smoothing) }
+                for stroke in layer.strokes { draw(stroke, into: ctx, smoothing: smoothing, colorSpace: space) }
             }
         }
     }
@@ -188,25 +195,26 @@ public enum StrokeRasterizer {
     /// Rasterizes a session to a `CGImage` at the given scale, optionally over a
     /// background color (nil = transparent).
     public static func makeImage(
-        _ session: DrawingSession, scale: CGFloat = 1, background: StrokeColor? = nil
+        _ session: DrawingSession, scale: CGFloat = 1, background: StrokeColor? = nil,
+        colorSpace space: CGColorSpace = colorSpace
     ) -> CGImage? {
         let w = max(1, Int((CGFloat(session.canvasSize.x) * scale).rounded()))
         let h = max(1, Int((CGFloat(session.canvasSize.y) * scale).rounded()))
         guard let ctx = CGContext(
             data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
-            space: colorSpace,
+            space: space,
             bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
         ) else { return nil }
 
         if let background {
-            ctx.setFillColor(background.cgColor)
+            ctx.setFillColor(background.cgColor(in: space))
             ctx.fill(CGRect(x: 0, y: 0, width: w, height: h))
         }
         ctx.translateBy(x: 0, y: CGFloat(h))
         ctx.scaleBy(x: scale, y: -scale)
         ctx.setLineCap(.round)
         ctx.setLineJoin(.round)
-        render(session, into: ctx)
+        render(session, into: ctx, colorSpace: space)
         return ctx.makeImage()
     }
 }

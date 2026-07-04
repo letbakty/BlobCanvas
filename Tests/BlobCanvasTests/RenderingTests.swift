@@ -58,6 +58,22 @@ final class RasterizerTests: XCTestCase {
         XCTAssertEqual(image.width, 150)
         XCTAssertEqual(image.height, 120)
     }
+
+    /// Wide-gamut rendering tags the image with Display P3, so the same encoded
+    /// RGB spans the wider gamut (identical bytes, wider space = more saturated
+    /// on-screen). Verify the color space actually differs.
+    func testWideGamutUsesDisplayP3Space() {
+        var session = DrawingSession(canvasSize: SIMD2(20, 20))
+        session.commit(Stroke(points: [StrokePoint(x: 2 as Float, y: 10), StrokePoint(x: 18 as Float, y: 10)],
+                              color: StrokeColor(r: 255, g: 0, b: 0), brushSize: 20))
+        let srgb = StrokeRasterizer.makeImage(session, scale: 1, colorSpace: StrokeRasterizer.colorSpace)!
+        let p3 = StrokeRasterizer.makeImage(session, scale: 1, colorSpace: StrokeRasterizer.displayP3)!
+        XCTAssertEqual(srgb.colorSpace?.name, CGColorSpace.sRGB)
+        XCTAssertEqual(p3.colorSpace?.name, CGColorSpace.displayP3)
+        // Both still paint a red stroke down the middle.
+        XCTAssertGreaterThan(pixel(p3, 10, 10).r, 200)
+        XCTAssertGreaterThan(pixel(p3, 10, 10).a, 200)
+    }
 }
 
 final class LayerTests: XCTestCase {
