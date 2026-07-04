@@ -159,6 +159,24 @@ final class CanvasViewportTests: XCTestCase {
         XCTAssertEqual(vp.zoom, 1, accuracy: 1e-6)
     }
 
+    /// The render-scale rule (display × zoom, capped by a pixel budget) that
+    /// keeps zoomed-in re-bakes crisp yet bounded. Mirrors the engine's logic.
+    func testRenderScaleClampsToPixelBudget() {
+        let canvas = CGSize(width: 1000, height: 800)
+        let maxPixels: CGFloat = 8_000_000
+        func renderScale(display: CGFloat, zoom: CGFloat) -> CGFloat {
+            let wanted = display * max(zoom, 1)
+            let budget = (maxPixels / (canvas.width * canvas.height)).squareRoot()
+            return max(display, min(wanted, budget))
+        }
+        // No zoom: exactly display scale.
+        XCTAssertEqual(renderScale(display: 2, zoom: 1), 2, accuracy: 1e-6)
+        // Moderate zoom scales up for crispness.
+        XCTAssertEqual(renderScale(display: 2, zoom: 1.4), 2.8, accuracy: 1e-6)
+        // Extreme zoom is capped by the pixel budget (√(8e6/8e5) ≈ 3.16).
+        XCTAssertEqual(renderScale(display: 2, zoom: 100), 3.162, accuracy: 1e-2)
+    }
+
     func testPanIgnoredWhenNotZoomed() {
         var vp = CanvasViewport(canvasSize: CGSize(width: 100, height: 100),
                                 viewBounds: CGSize(width: 100, height: 100))

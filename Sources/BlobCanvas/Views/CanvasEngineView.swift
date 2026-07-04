@@ -269,7 +269,11 @@ public final class CanvasEngineView: PlatformView {
 
     // MARK: - Buffers
 
-    private func currentScale() -> CGFloat {
+    /// Cap on backing pixels so zoomed-in re-bakes stay bounded (~8 MP ≈ 3×
+    /// a 1024×768@2 canvas). Public so hosts can tune the memory/sharpness trade.
+    public var maxBackingPixels: Int = 8_000_000
+
+    private func displayScale() -> CGFloat {
         #if canImport(UIKit)
         let s = traitCollection.displayScale
         return s > 0 ? s : (window?.screen.scale ?? 2)
@@ -278,9 +282,23 @@ public final class CanvasEngineView: PlatformView {
         #endif
     }
 
+    /// Resolution to bake the canvas at: display scale × current zoom, so a
+    /// zoomed-in view is crisp (vector re-baked, not bilinear-stretched raster),
+    /// clamped to `maxBackingPixels`.
+    private func targetRenderScale() -> CGFloat {
+        let base = displayScale()
+        guard canvasSize.width > 0, canvasSize.height > 0 else { return base }
+        let wanted = base * max(zoomScale, 1)
+        let budget = (CGFloat(maxBackingPixels) / (canvasSize.width * canvasSize.height)).squareRoot()
+        return max(base, min(wanted, budget))
+    }
+
     private func ensureBuffers() {
-        let scale = currentScale()
-        if let committed, committed.scale == scale, committed.canvasSize == canvasSize { return }
+        let scale = targetRenderScale()
+        // Recreate when the canvas changed or the render scale drifted enough
+        // (>10%) to matter — avoids churn on tiny zoom deltas.
+        if let committed, committed.canvasSize == canvasSize,
+           abs(committed.scale - scale) / scale < 0.1 { return }
         committed = CanvasBuffer(canvasSize: canvasSize, scale: scale)
         live = CanvasBuffer(canvasSize: canvasSize, scale: scale)
         predicted = CanvasBuffer(canvasSize: canvasSize, scale: scale)
@@ -325,7 +343,8 @@ public final class CanvasEngineView: PlatformView {
     /// Current pan translation in view points.
     public private(set) var panOffset: CGPoint = .zero
 
-    public func zoom(by factor: CGFloat, at focal: CGPoint) {
+    /// Transform-only zoom (raster is bilinear-scaled — fine mid-gesture).
+    private func applyZoom(by factor: CGFloat, at focal: CGPoint) {
         var vp = viewport()
         vp.zoom(by: factor, at: focal)
         zoomScale = vp.zoom
@@ -333,18 +352,28 @@ public final class CanvasEngineView: PlatformView {
         setNeedsFullDisplay()
     }
 
+    /// Re-bakes the canvas at the current zoom's resolution so it's crisp (not a
+    /// stretched raster). Call when a zoom gesture settles; one-shot `zoom(by:at:)`
+    /// does it automatically.
+    public func refreshRenderResolution() { ensureBuffers() }
+
+    public func zoom(by factor: CGFloat, at focal: CGPoint) {
+        applyZoom(by: factor, at: focal)
+        ensureBuffers()
+    }
+
     public func pan(by delta: CGPoint) {
         var vp = viewport()
         vp.translate(by: delta)
         zoomScale = vp.zoom
         panOffset = vp.pan
-        setNeedsFullDisplay()
+        setNeedsFullDisplay()   // pan doesn't change resolution — no re-bake
     }
 
     public func resetZoom() {
         zoomScale = 1
         panOffset = .zero
-        setNeedsFullDisplay()
+        ensureBuffers()   // back to fit resolution
     }
 
     // MARK: - Live input (hot path)
@@ -628,10 +657,17 @@ extension CanvasEngineView {
     // MARK: Zoom / pan gestures
 
     @objc private func handlePinch(_ g: UIPinchGestureRecognizer) {
-        if g.state == .began { cancelActiveStroke() }
-        guard g.state == .changed else { return }
-        zoom(by: g.scale, at: g.location(in: self))
-        g.scale = 1
+        switch g.state {
+        case .began:
+            cancelActiveStroke()
+        case .changed:
+            applyZoom(by: g.scale, at: g.location(in: self))   // transform only, no re-bake
+            g.scale = 1
+        case .ended, .cancelled, .failed:
+            refreshRenderResolution()                          // crisp re-bake when settled
+        default:
+            break
+        }
     }
 
     @objc private func handlePan(_ g: UIPanGestureRecognizer) {
@@ -666,7 +702,10 @@ extension CanvasEngineView {
 
     public override func magnify(with event: NSEvent) {
         cancelActiveStroke()
-        zoom(by: 1 + event.magnification, at: convert(event.locationInWindow, from: nil))
+        applyZoom(by: 1 + event.magnification, at: convert(event.locationInWindow, from: nil))
+        if event.phase.contains(.ended) || event.phase.contains(.cancelled) {
+            refreshRenderResolution()
+        }
     }
 
     public override func scrollWheel(with event: NSEvent) {
