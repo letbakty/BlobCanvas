@@ -28,6 +28,7 @@ public final class BlobCanvasController {
     public func addLayer(name: String? = nil) { engineView?.addLayer(name: name) }
     public func setActiveLayer(_ index: Int) { engineView?.setActiveLayer(index) }
     public func removeActiveLayer() { engineView?.removeActiveLayer() }
+    public func moveLayer(from source: Int, to destination: Int) { engineView?.moveLayer(from: source, to: destination) }
     public func setLayerOpacity(_ opacity: Float, at index: Int) { engineView?.setLayerOpacity(opacity, at: index) }
     public func setLayerVisible(_ visible: Bool, at index: Int) { engineView?.setLayerVisible(visible, at: index) }
 

@@ -249,6 +249,12 @@ public final class CanvasEngineView: PlatformView {
         onSessionChanged?(session)
     }
 
+    public func moveLayer(from source: Int, to destination: Int) {
+        session.moveLayer(from: source, to: destination)
+        rebake()
+        onSessionChanged?(session)
+    }
+
     public func setLayerOpacity(_ opacity: Float, at index: Int) {
         session.setOpacity(opacity, ofLayer: index)
         rebake()

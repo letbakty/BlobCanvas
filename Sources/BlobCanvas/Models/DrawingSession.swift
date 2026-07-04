@@ -70,6 +70,20 @@ public struct DrawingSession: Sendable {
         redoStack.removeAll(keepingCapacity: true)
     }
 
+    /// Moves a layer within the stack (reorders paint order). The active layer
+    /// follows the same layer identity.
+    public mutating func moveLayer(from source: Int, to destination: Int) {
+        guard layers.indices.contains(source),
+              destination >= 0, destination < layers.count, source != destination else { return }
+        let activeID = layers[activeLayerIndex].id
+        let layer = layers.remove(at: source)
+        layers.insert(layer, at: destination)
+        if let newActive = layers.firstIndex(where: { $0.id == activeID }) {
+            activeLayerIndex = newActive
+        }
+        redoStack.removeAll(keepingCapacity: true)
+    }
+
     public mutating func setOpacity(_ opacity: Float, ofLayer index: Int) {
         guard layers.indices.contains(index) else { return }
         layers[index].opacity = min(max(opacity, 0), 1)

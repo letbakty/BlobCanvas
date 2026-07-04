@@ -65,6 +65,26 @@ final class IncrementalEncoderTests: XCTestCase {
         XCTAssertEqual(decoded.activeLayerIndex, 1)
     }
 
+    /// Reordering layers must not corrupt the blob — frames are keyed by layer
+    /// identity, not index (index-keying would swap the wrong frames).
+    func testReorderLayersStaysCorrect() throws {
+        let encoder = IncrementalDrawingEncoder(sealThreshold: 4)
+        var session = DrawingSession(canvasSize: SIMD2(300, 300))
+        for n in 0..<10 { session.commit(stroke(n)) }           // layer 0: 10 strokes
+        session.addLayer(name: "Top")
+        for n in 100..<103 { session.commit(stroke(n)) }        // layer 1: 3 strokes
+        _ = encoder.encode(session)                             // seals frames per layer
+
+        session.moveLayer(from: 0, to: 1)                       // swap order
+        let blob = encoder.encode(session)
+
+        let decoded = try DrawingSession(serialized: blob)
+        let oneShot = try DrawingSession(serialized: session.serialized())
+        XCTAssertEqual(decoded.layers.map(\.name), ["Top", "Layer 1"])
+        XCTAssertEqual(decoded.layers[0].strokes, oneShot.layers[0].strokes)
+        XCTAssertEqual(decoded.layers[1].strokes, oneShot.layers[1].strokes)
+    }
+
     func testResetForcesFullReencode() throws {
         let encoder = IncrementalDrawingEncoder()
         var session = DrawingSession()

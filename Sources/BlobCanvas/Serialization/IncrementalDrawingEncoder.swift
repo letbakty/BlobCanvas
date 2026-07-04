@@ -29,61 +29,54 @@ public final class IncrementalDrawingEncoder {
         var sealedCount: Int = 0
     }
 
-    private var layers: [LayerFrames] = []
+    /// Keyed by `Layer.id`, so sealed frames follow their layer across
+    /// insertion, reordering, and removal — never misaligned by index.
+    private var cache: [UUID: LayerFrames] = [:]
 
     public init(sealThreshold: Int = 48) {
         self.sealThreshold = max(sealThreshold, 1)
     }
 
     /// Drops all cached frames; the next `encode` re-encodes from scratch.
-    public func reset() { layers.removeAll(keepingCapacity: true) }
+    public func reset() { cache.removeAll(keepingCapacity: true) }
 
     public func encode(_ session: DrawingSession) -> Data {
-        reconcileLayerCount(session)
-
         var meta: [(name: String, opacity: Float, isVisible: Bool, frames: [Data])] = []
         meta.reserveCapacity(session.layers.count)
+        var live = Set<UUID>()
 
-        for (i, layer) in session.layers.enumerated() {
+        for layer in session.layers {
+            live.insert(layer.id)
+            var state = cache[layer.id] ?? LayerFrames()
             let strokes = layer.strokes
             let current = strokes.count
 
             // Undo past a seal boundary invalidates sealed frames — rebuild.
-            if current < layers[i].sealedCount { layers[i] = LayerFrames() }
+            if current < state.sealedCount { state = LayerFrames() }
 
             // Seal full chunks that have accumulated since last time.
-            while current - layers[i].sealedCount >= sealThreshold {
-                let start = layers[i].sealedCount
+            while current - state.sealedCount >= sealThreshold {
+                let start = state.sealedCount
                 let slice = strokes[start..<(start + sealThreshold)]
-                layers[i].sealed.append(DrawingBlobCodec.encodeFrame(slice, count: sealThreshold))
-                layers[i].sealedCount += sealThreshold
+                state.sealed.append(DrawingBlobCodec.encodeFrame(slice, count: sealThreshold))
+                state.sealedCount += sealThreshold
             }
+            cache[layer.id] = state
 
             // Sealed frames + a freshly-encoded (small) tail.
-            var frames = layers[i].sealed
-            let tailCount = current - layers[i].sealedCount
+            var frames = state.sealed
+            let tailCount = current - state.sealedCount
             if tailCount > 0 {
-                frames.append(DrawingBlobCodec.encodeFrame(strokes[layers[i].sealedCount..<current], count: tailCount))
+                frames.append(DrawingBlobCodec.encodeFrame(strokes[state.sealedCount..<current], count: tailCount))
             }
             meta.append((name: layer.name, opacity: layer.opacity, isVisible: layer.isVisible, frames: frames))
         }
 
+        // Forget layers that were removed.
+        cache = cache.filter { live.contains($0.key) }
+
         return DrawingBlobCodec.assembleV5(canvasSize: session.canvasSize,
                                            activeLayerIndex: session.activeLayerIndex,
                                            layers: meta)
-    }
-
-    // MARK: - Private
-
-    /// Rebuilds cache slots when layers were added/removed. Existing slots keep
-    /// their sealed frames (index-stable common case: appending a layer).
-    private func reconcileLayerCount(_ session: DrawingSession) {
-        if layers.count == session.layers.count { return }
-        if layers.count < session.layers.count {
-            layers.append(contentsOf: Array(repeating: LayerFrames(), count: session.layers.count - layers.count))
-        } else {
-            // A layer was removed; index mapping is ambiguous, so re-seal all.
-            layers = Array(repeating: LayerFrames(), count: session.layers.count)
-        }
     }
 }
