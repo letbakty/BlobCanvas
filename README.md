@@ -35,8 +35,8 @@ DrawingBlobCodec (flat binary + LZFSE)
 - **Zero per-frame copy.** Both buffers own their pixel memory and are presented as lightweight `CGImage`s over a persistent `CGDataProvider` — no `makeImage()` snapshot copy on the draw path.
 - **Correct translucency.** A stroke is rendered as one `fillPath`, so self-overlaps never double-blend; translucent brushes stay uniform with no beading at sample points. The live stroke is drawn opaque and composited once with the brush's alpha at present time.
 - **Fixed logical canvas.** Strokes live in device-independent canvas coordinates; the view aspect-fits them into its bounds, so a drawing opens identically on any screen size.
-- **Coalesced touches** on iOS deliver the full 120/240 Hz sample stream even between display refreshes.
-- **Bulk binary serialization.** `[StrokePoint]` is memcpy'd directly into the payload (no per-point Codable overhead), then LZFSE-compressed off the main actor via `drawing.save(session)`. Encoding 10k points takes ~1.5 ms.
+- **Low-latency Pencil input** on iOS: coalesced touches capture the full 120/240 Hz sample stream, predicted touches draw a forecast tail (~1 frame less perceived lag), and late-arriving estimated force values patch already-recorded points so pressure is correct from the first sample.
+- **Compact delta encoding.** Points are quantized (1/32 pt, 8-bit pressure, 1 ms) and stored as zig-zag varint deltas, then LZFSE-compressed off the main actor via `drawing.save(session)` — several times smaller than raw `Float32` on real input. Legacy v1 blobs still decode.
 
 ## Usage
 

@@ -121,11 +121,21 @@ public final class CanvasEngineView: PlatformView {
 
     private var committed: CanvasBuffer?
     private var live: CanvasBuffer?
+    /// Ephemeral forecast tail from `predictedTouches` — drawn but never
+    /// committed to `liveStroke`; cleared and redrawn each input event.
+    private var predicted: CanvasBuffer?
+    private var predictedBBox: CGRect = .null   // canvas space; region to clear
     private var canvasSize: CGSize = CGSize(width: 1024, height: 768)
 
     private var liveStroke = Stroke()
     private var liveStrokeStartTime: CFTimeInterval = 0
     private var isStroking = false
+
+    #if canImport(UIKit)
+    /// Maps a touch's `estimationUpdateIndex` to the index of the point it
+    /// produced in `liveStroke`, so late-arriving force values can patch it.
+    private var estimationMap: [NSNumber: Int] = [:]
+    #endif
 
     // MARK: - Init
 
@@ -205,6 +215,8 @@ public final class CanvasEngineView: PlatformView {
         if let committed, committed.scale == scale, committed.canvasSize == canvasSize { return }
         committed = CanvasBuffer(canvasSize: canvasSize, scale: scale)
         live = CanvasBuffer(canvasSize: canvasSize, scale: scale)
+        predicted = CanvasBuffer(canvasSize: canvasSize, scale: scale)
+        predictedBBox = .null
         rebake()
     }
 
@@ -229,6 +241,7 @@ public final class CanvasEngineView: PlatformView {
             fillRibbon(stroke, into: ctx, color: stroke.color)
         }
         live?.clear()
+        clearPredicted()
         setNeedsFullDisplay()
     }
 
@@ -314,13 +327,19 @@ public final class CanvasEngineView: PlatformView {
         liveStroke.points.reserveCapacity(2048)
         liveStrokeStartTime = CACurrentMediaTime()
         isStroking = true
+        #if canImport(UIKit)
+        estimationMap.removeAll(keepingCapacity: true)
+        #endif
+        clearPredicted()
         appendLivePoint(atCanvas: p, pressure: pressure)
     }
 
     /// Appends one point and incrementally fills only its new joint into `live`
     /// (opaque — alpha is applied once at present time).
-    private func appendLivePoint(atCanvas point: CGPoint, pressure: CGFloat) {
-        guard isStroking, let live else { return }
+    /// - Returns: `true` if the point was appended (not skipped as too close).
+    @discardableResult
+    private func appendLivePoint(atCanvas point: CGPoint, pressure: CGFloat) -> Bool {
+        guard isStroking, let live else { return false }
         let p = StrokePoint(
             x: point.x, y: point.y, pressure: pressure,
             timestamp: Float(CACurrentMediaTime() - liveStrokeStartTime)
@@ -336,7 +355,7 @@ public final class CanvasEngineView: PlatformView {
         let path = CGMutablePath()
         if let last = liveStroke.points.last {
             let dx = p.x - last.x, dy = p.y - last.y
-            guard dx * dx + dy * dy > 0.0625 else { return } // skip sub-quarter-point moves
+            guard dx * dx + dy * dy > 0.0625 else { return false } // skip sub-quarter-point moves
             let lastR = halfWidth(last, liveStroke)
             addDot(path, at: p, radius: r)
             addQuad(path, from: last, to: p, ra: lastR, rb: r)
@@ -350,8 +369,8 @@ public final class CanvasEngineView: PlatformView {
         ctx.fillPath()
         liveStroke.points.append(p)
 
-        let pad = CGFloat(liveStroke.brushSize) + 2
-        setNeedsDisplay(canvasRectToView(dirty).insetBy(dx: -pad * fit().scale, dy: -pad * fit().scale))
+        setNeedsDisplay(viewDirtyRect(canvas: dirty))
+        return true
     }
 
     private func endStroke() {
@@ -362,9 +381,66 @@ public final class CanvasEngineView: PlatformView {
             fillRibbon(liveStroke, into: committed.context, color: liveStroke.color)
         }
         live?.clear()
+        clearPredicted()
+        #if canImport(UIKit)
+        estimationMap.removeAll(keepingCapacity: true)
+        #endif
         session.commit(liveStroke)
         setNeedsFullDisplay()
         onSessionChanged?(session)
+    }
+
+    // MARK: - Predicted tail
+
+    /// Renders a short forecast ribbon from the last confirmed point through the
+    /// predicted canvas points into the `predicted` buffer. Reduces perceived
+    /// pen latency by ~1 frame; the tail is discarded on the next real event.
+    private func renderPredicted(canvasPoints tail: [CGPoint]) {
+        guard isStroking, let predicted, let anchor = liveStroke.points.last else { return }
+        let oldRegion = predictedBBox
+
+        var stroke = liveStroke
+        let tailPressure = anchor.pressure
+        stroke.points = [anchor] + tail.map {
+            StrokePoint(x: Float($0.x), y: Float($0.y), pressure: tailPressure)
+        }
+        predicted.context.clear(oldRegion.isNull ? CGRect(origin: .zero, size: canvasSize) : oldRegion)
+
+        var opaque = liveStroke.color
+        opaque.a = 255
+        fillRibbon(stroke, into: predicted.context, color: opaque)
+        predictedBBox = strokeBBox(stroke)
+
+        var dirty = oldRegion
+        dirty = dirty.isNull ? predictedBBox : dirty.union(predictedBBox)
+        setNeedsDisplay(viewDirtyRect(canvas: dirty))
+    }
+
+    private func clearPredicted() {
+        guard let predicted else { return }
+        if !predictedBBox.isNull {
+            predicted.context.clear(predictedBBox)
+            setNeedsDisplay(viewDirtyRect(canvas: predictedBBox))
+        }
+        predictedBBox = .null
+    }
+
+    private func strokeBBox(_ stroke: Stroke) -> CGRect {
+        guard let first = stroke.points.first else { return .null }
+        var minX = first.x, minY = first.y, maxX = first.x, maxY = first.y
+        for p in stroke.points {
+            minX = min(minX, p.x); minY = min(minY, p.y)
+            maxX = max(maxX, p.x); maxY = max(maxY, p.y)
+        }
+        let pad = stroke.brushSize + 2
+        return CGRect(x: CGFloat(minX) - CGFloat(pad), y: CGFloat(minY) - CGFloat(pad),
+                      width: CGFloat(maxX - minX) + CGFloat(pad) * 2,
+                      height: CGFloat(maxY - minY) + CGFloat(pad) * 2)
+    }
+
+    private func viewDirtyRect(canvas rect: CGRect) -> CGRect {
+        let pad = (CGFloat(liveStroke.brushSize) + 2) * fit().scale
+        return canvasRectToView(rect).insetBy(dx: -pad, dy: -pad)
     }
 
     // MARK: - Present
@@ -388,8 +464,14 @@ public final class CanvasEngineView: PlatformView {
         if let image = committed?.makeImage() {
             drawUpright(image, in: rect, into: target, alpha: 1)
         }
-        if isStroking, let image = live?.makeImage() {
-            drawUpright(image, in: rect, into: target, alpha: CGFloat(liveStroke.color.a) / 255)
+        if isStroking {
+            let alpha = CGFloat(liveStroke.color.a) / 255
+            if let image = live?.makeImage() {
+                drawUpright(image, in: rect, into: target, alpha: alpha)
+            }
+            if !predictedBBox.isNull, let image = predicted?.makeImage() {
+                drawUpright(image, in: rect, into: target, alpha: alpha)
+            }
         }
     }
 
@@ -426,7 +508,33 @@ extension CanvasEngineView {
         // Coalesced touches deliver the full 120/240 Hz sample stream even
         // when the display refreshes slower — critical for smooth curves.
         for t in event?.coalescedTouches(for: touch) ?? [touch] {
-            appendLivePoint(atCanvas: viewToCanvas(t.location(in: self)), pressure: normalizedForce(t))
+            let appended = appendLivePoint(atCanvas: viewToCanvas(t.location(in: self)),
+                                           pressure: normalizedForce(t))
+            // Record which point to patch when a late force value arrives.
+            if appended, t.estimatedPropertiesExpectingUpdates.contains(.force),
+               let index = t.estimationUpdateIndex {
+                estimationMap[index] = liveStroke.points.count - 1
+            }
+        }
+        // Predicted touches forecast the next frame; drawn but not committed.
+        let predictedTail = (event?.predictedTouches(for: touch) ?? []).map {
+            viewToCanvas($0.location(in: self))
+        }
+        renderPredicted(canvasPoints: predictedTail)
+    }
+
+    /// Late-arriving precise values (notably Pencil force) for points we already
+    /// recorded with an estimate. Patches the stored data so the committed
+    /// render uses the true pressure.
+    public override func touchesEstimatedPropertiesUpdated(_ touches: Set<UITouch>) {
+        for touch in touches {
+            guard let index = touch.estimationUpdateIndex,
+                  let pointIndex = estimationMap[index],
+                  pointIndex < liveStroke.points.count else { continue }
+            liveStroke.points[pointIndex].pressure = Float(normalizedForce(touch))
+            if !touch.estimatedPropertiesExpectingUpdates.contains(.force) {
+                estimationMap[index] = nil
+            }
         }
     }
 
