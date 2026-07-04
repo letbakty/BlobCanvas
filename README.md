@@ -24,10 +24,13 @@ DrawingBlobCodec (flat binary + LZFSE)
 | `StrokePoint` | [StrokePoint.swift](Sources/BlobCanvas/Models/StrokePoint.swift) | 16-byte POD point (x, y, pressure, timestamp) |
 | `Stroke` / `StrokeColor` | [Stroke.swift](Sources/BlobCanvas/Models/Stroke.swift) | Point run + RGBA color + brush size |
 | `DrawingSession` | [DrawingSession.swift](Sources/BlobCanvas/Models/DrawingSession.swift) | In-memory state, O(1) undo/redo stacks |
-| `DrawingBlobCodec` | [DrawingBlobCodec.swift](Sources/BlobCanvas/Serialization/DrawingBlobCodec.swift) | Delta+quantized binary (v4, layers) + LZFSE; v1–v3 decode |
-| `Drawing` | [Drawing.swift](Sources/BlobCanvas/Persistence/Drawing.swift) | SwiftData `@Model` holding the blob + metadata |
+| `DrawingBlobCodec` | [DrawingBlobCodec.swift](Sources/BlobCanvas/Serialization/DrawingBlobCodec.swift) | Delta+quantized binary (v4, layers) + LZFSE; v1–v3 & v5 decode |
+| `IncrementalDrawingEncoder` | [IncrementalDrawingEncoder.swift](Sources/BlobCanvas/Serialization/IncrementalDrawingEncoder.swift) | Append-only save (v5 sealed frames) — no O(n²) re-encode |
+| `Drawing` | [Drawing.swift](Sources/BlobCanvas/Persistence/Drawing.swift) | SwiftData `@Model`: blob + thumbnail + metadata |
 | `Layer` | [Layer.swift](Sources/BlobCanvas/Models/Layer.swift) | Named group of strokes with opacity + visibility |
-| `StrokeRasterizer` | [StrokeRasterizer.swift](Sources/BlobCanvas/Rendering/StrokeRasterizer.swift) | Pure geometry: smoothing, velocity width, blend modes, layer compositing |
+| `StrokeRasterizer` | [StrokeRasterizer.swift](Sources/BlobCanvas/Rendering/StrokeRasterizer.swift) | Pure CG geometry: smoothing, velocity width, blend modes, layer compositing |
+| `SessionImageRenderer` | [SessionImageRenderer.swift](Sources/BlobCanvas/Rendering/SessionImageRenderer.swift) | Renderer protocol; `CoreGraphicsRenderer` default |
+| `MetalSessionRenderer` | [MetalSessionRenderer.swift](Sources/BlobCanvas/Rendering/MetalSessionRenderer.swift) | GPU offscreen rasterizer (tessellated ribbons → texture) |
 | `CanvasViewport` | [CanvasViewport.swift](Sources/BlobCanvas/Rendering/CanvasViewport.swift) | Testable canvas↔view transform with zoom/pan |
 | `DrawingExporter` | [DrawingExporter.swift](Sources/BlobCanvas/Rendering/DrawingExporter.swift) | PNG / PDF / SVG / thumbnail export |
 | `DrawingPlayer` | [DrawingPlayer.swift](Sources/BlobCanvas/Rendering/DrawingPlayer.swift) | Timestamp-driven replay of drawing creation |
@@ -45,13 +48,25 @@ DrawingBlobCodec (flat binary + LZFSE)
 - **Export.** `DrawingExporter.pngData / pdfData / svgString / thumbnailPNG`.
 - **Replay.** `DrawingPlayer(session).snapshot(at:)` reconstructs the drawing at any point in its creation from the captured timestamps.
 
-## Not yet (deliberately deferred)
+## Persistence performance
 
-These need on-device verification or a large rewrite and would regress quality if shipped half-done:
+- **Incremental save.** Keep one `IncrementalDrawingEncoder` per open drawing and call `encoder.encode(session)` from your debounced auto-save. Strokes are sealed into compressed frames in chunks; each save re-encodes only the small open tail, so a long session doesn't pay O(n) per stroke. Structural edits (undo past a seal, layer removal) re-compact automatically. Output is a normal blob decoded by `DrawingSession(serialized:)`.
+- **Off-main encode.** `await drawing.save(session)` / `save(_:thumbnailMaxDimension:)` compress on a background task.
 
-- **Metal / `CAMetalLayer` backend.** The Core Graphics path meets 120 FPS for the target canvas sizes; a GPU renderer at full feature parity (single-coverage translucency, smoothing, eraser, layers, AA) is a dedicated effort.
+## Not yet (needs on-device verification)
+
+The offscreen Metal renderer above is done and GPU-tested. What remains is inherently device-bound:
+
+- **Live `CAMetalLayer` view path** — driving `CanvasEngineView` on the GPU at 120 Hz (vs the current Core Graphics buffers) needs real-device frame validation; the offscreen `MetalSessionRenderer` is the foundation.
 - **IOSurface presentation & canvas tiling** — for very large canvases; the current owned-buffer + provider path already avoids per-frame copies at normal sizes.
-- **Append-only incremental save** — async + debounced `save` already keep encoding off the main thread; append framing is a narrower win with real format complexity.
+
+## Testing
+
+`swift test` runs 50 tests: codec round-trip/fuzz (3000 hostile-input decodes), incremental-encoder correctness, headless golden-pixel checks for both the Core Graphics and Metal renderers, layer compositing, viewport math, export, and replay. Requires the Xcode 16 toolchain (Swift 6):
+
+```sh
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test
+```
 
 ## Why it's fast
 
@@ -104,21 +119,14 @@ Container setup:
 .modelContainer(for: Drawing.self)
 ```
 
-## Binary format
+## Binary format (v4)
 
 ```
 "BLBC" | version u16 | algorithm u8 (0 raw, 1 LZFSE) | payload…
-payload: canvasW f32 | canvasH f32 | strokeCount u32
-  per stroke: rgba 4×u8 | brushSize f32 | pointCount u32 | points pointCount×16B
-  per point:  x f32 | y f32 | pressure f32 | timestamp f32
+payload: canvasW f32 | canvasH f32 | activeLayer varint | layerCount varint
+  per layer: name(varint len + utf8) | opacity f32 | visible u8 | strokeCount varint | strokes…
+    per stroke: rgba 4×u8 | flags u8 (erase bit + dynamics) | brushSize f32 | pointCount varint | points…
+      per point: Δx zig-zag varint | Δy zig-zag varint | pressure u8 | Δt zig-zag varint
 ```
 
-All little-endian. Versioned header allows future migration.
-
-## Building & testing
-
-Requires the Xcode toolchain for SwiftData macros:
-
-```sh
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test
-```
+Header scalars little-endian; points quantized (1/32 pt, 8-bit pressure, 1 ms) and delta-coded. `decode` dispatches per version — v1 (raw f32), v2 (delta, no flags), v3 (delta + flags), v4 (layers), v5 (incremental frames) — so old blobs keep loading.
