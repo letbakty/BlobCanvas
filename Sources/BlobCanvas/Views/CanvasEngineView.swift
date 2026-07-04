@@ -409,12 +409,22 @@ public final class CanvasEngineView: PlatformView {
             timestamp: Float(CACurrentMediaTime() - liveStrokeStartTime)
         )
 
+        let isErase = liveStroke.blendMode == .erase
+        // A live eraser can only safely clear into `committed` when there's a
+        // single layer — otherwise it would visibly erase the layers below it
+        // mid-drag. With multiple layers we record the point and apply the
+        // (layer-local) erase on commit via re-bake; no destructive preview.
+        let eraseIntoCommitted = isErase && session.layers.count == 1
+        if isErase && !eraseIntoCommitted {
+            liveStroke.points.append(p)
+            return true
+        }
+
         let r = StrokeRasterizer.halfWidth(p, previous: last, liveStroke)
         let from = last.map { ($0.cgPoint, StrokeRasterizer.halfWidth($0, previous: nil, liveStroke)) }
         let path = CGMutablePath()
         StrokeRasterizer.addIncrementalJoint(path, from: from, to: (p.cgPoint, r))
 
-        let isErase = liveStroke.blendMode == .erase
         guard let ctx = (isErase ? committed : live)?.context else { return false }
         ctx.saveGState()
         if isErase {
