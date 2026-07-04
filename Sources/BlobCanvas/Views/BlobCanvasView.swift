@@ -11,6 +11,9 @@ public final class BlobCanvasController {
     /// Mirrored flags for enabling/disabling toolbar buttons.
     public private(set) var canUndo = false
     public private(set) var canRedo = false
+    /// Mirrored layer stack for building a layer panel.
+    public private(set) var layers: [Layer] = []
+    public private(set) var activeLayerIndex = 0
 
     /// Called whenever history changes — attach your debounced auto-save.
     public var onSessionChanged: ((DrawingSession) -> Void)?
@@ -21,6 +24,13 @@ public final class BlobCanvasController {
     public func redo() { engineView?.redo() }
     public func clear() { engineView?.clear() }
 
+    // Layer controls
+    public func addLayer(name: String? = nil) { engineView?.addLayer(name: name) }
+    public func setActiveLayer(_ index: Int) { engineView?.setActiveLayer(index) }
+    public func removeActiveLayer() { engineView?.removeActiveLayer() }
+    public func setLayerOpacity(_ opacity: Float, at index: Int) { engineView?.setLayerOpacity(opacity, at: index) }
+    public func setLayerVisible(_ visible: Bool, at index: Int) { engineView?.setLayerVisible(visible, at: index) }
+
     /// Current in-memory session, e.g. for `drawing.save(controller.snapshot())`.
     public func snapshot() -> DrawingSession {
         engineView?.session ?? DrawingSession()
@@ -29,6 +39,8 @@ public final class BlobCanvasController {
     func sessionDidChange(_ session: DrawingSession) {
         canUndo = session.canUndo
         canRedo = session.canRedo
+        layers = session.layers
+        activeLayerIndex = session.activeLayerIndex
         onSessionChanged?(session)
     }
 }

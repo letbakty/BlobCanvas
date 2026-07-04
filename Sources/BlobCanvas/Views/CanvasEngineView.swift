@@ -211,6 +211,38 @@ public final class CanvasEngineView: PlatformView {
         onSessionChanged?(session)
     }
 
+    // MARK: - Layer API
+
+    @discardableResult
+    public func addLayer(name: String? = nil) -> Int {
+        let index = session.addLayer(name: name)
+        onSessionChanged?(session)
+        return index
+    }
+
+    public func setActiveLayer(_ index: Int) {
+        session.setActiveLayer(index)
+        onSessionChanged?(session)
+    }
+
+    public func removeActiveLayer() {
+        session.removeActiveLayer()
+        rebake()
+        onSessionChanged?(session)
+    }
+
+    public func setLayerOpacity(_ opacity: Float, at index: Int) {
+        session.setOpacity(opacity, ofLayer: index)
+        rebake()
+        onSessionChanged?(session)
+    }
+
+    public func setLayerVisible(_ visible: Bool, at index: Int) {
+        session.setVisible(visible, ofLayer: index)
+        rebake()
+        onSessionChanged?(session)
+    }
+
     // MARK: - Buffers
 
     private func currentScale() -> CGFloat {
@@ -350,17 +382,23 @@ public final class CanvasEngineView: PlatformView {
     private func endStroke() {
         guard isStroking else { return }
         isStroking = false
-        if !liveStroke.points.isEmpty, let committed {
-            // Authoritative render (smoothed). For erasers this re-applies the
-            // clear over the incremental preview — idempotent.
-            StrokeRasterizer.draw(liveStroke, into: committed.context, smoothing: smoothing)
+        let stroke = liveStroke
+        session.commit(stroke)
+        if !stroke.points.isEmpty {
+            if stroke.blendMode == .erase || !session.activeLayerIsTopOpaque {
+                // Erasers must be layer-local, and lower/translucent active
+                // layers need correct z-order/opacity — re-bake to composite.
+                rebake()
+            } else if let committed {
+                // Fast path: top opaque layer — just draw the smoothed ribbon on top.
+                StrokeRasterizer.draw(stroke, into: committed.context, smoothing: smoothing)
+            }
         }
         live?.clear()
         clearPredicted()
         #if canImport(UIKit)
         estimationMap.removeAll(keepingCapacity: true)
         #endif
-        session.commit(liveStroke)
         setNeedsFullDisplay()
         onSessionChanged?(session)
     }

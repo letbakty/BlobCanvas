@@ -11,7 +11,10 @@ public struct DrawingPlayer: Sendable {
     /// Pause inserted between consecutive strokes, in seconds.
     public var interStrokeGap: Double
 
-    private let session: DrawingSession
+    private let canvasSize: SIMD2<Float>
+    /// Strokes flattened across all layers, in composite order (replay animates
+    /// them as one timeline).
+    private let strokes: [Stroke]
     /// Absolute start time of each stroke on the replay timeline.
     private let starts: [Double]
     /// Duration of each stroke (last minus first point timestamp).
@@ -20,16 +23,17 @@ public struct DrawingPlayer: Sendable {
     public let duration: Double
 
     public init(_ session: DrawingSession, interStrokeGap: Double = 0.12) {
-        self.session = session
+        self.canvasSize = session.canvasSize
+        self.strokes = session.allStrokes
         self.interStrokeGap = interStrokeGap
 
         var starts = [Double]()
         var durations = [Double]()
-        starts.reserveCapacity(session.strokes.count)
-        durations.reserveCapacity(session.strokes.count)
+        starts.reserveCapacity(strokes.count)
+        durations.reserveCapacity(strokes.count)
 
         var cursor = 0.0
-        for stroke in session.strokes {
+        for stroke in strokes {
             let d = Double(stroke.points.last.map { $0.timestamp - (stroke.points.first?.timestamp ?? 0) } ?? 0)
             starts.append(cursor)
             durations.append(d)
@@ -43,10 +47,10 @@ public struct DrawingPlayer: Sendable {
     /// The drawing as it looked `time` seconds into its creation: all earlier
     /// strokes complete, plus the partially-drawn current stroke.
     public func snapshot(at time: Double) -> DrawingSession {
-        var out = DrawingSession(canvasSize: session.canvasSize)
+        var out = DrawingSession(canvasSize: canvasSize)
         guard time > 0 else { return out }
 
-        for (i, stroke) in session.strokes.enumerated() {
+        for (i, stroke) in strokes.enumerated() {
             let start = starts[i]
             if start >= time { break }                      // not started yet
             if start + durations[i] <= time {

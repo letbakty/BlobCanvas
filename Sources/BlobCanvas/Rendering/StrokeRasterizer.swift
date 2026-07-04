@@ -160,10 +160,23 @@ public enum StrokeRasterizer {
         ctx.restoreGState()
     }
 
-    /// Renders every stroke of a session into `ctx` (in canvas-point space).
+    /// Renders every visible layer of a session into `ctx` (canvas-point space),
+    /// bottom-up. Layers that need isolation — non-opaque, or containing an
+    /// eraser (so `.clear` only affects that layer, not the ones beneath) — are
+    /// drawn inside a transparency group; opaque plain layers draw directly.
     public static func render(_ session: DrawingSession, into ctx: CGContext, smoothing: Bool = true) {
-        for stroke in session.strokes {
-            draw(stroke, into: ctx, smoothing: smoothing)
+        for layer in session.layers where layer.isVisible && !layer.strokes.isEmpty {
+            let needsGroup = layer.opacity < 0.999 || layer.strokes.contains { $0.blendMode == .erase }
+            if needsGroup {
+                ctx.saveGState()
+                ctx.setAlpha(CGFloat(layer.opacity))
+                ctx.beginTransparencyLayer(auxiliaryInfo: nil)
+                for stroke in layer.strokes { draw(stroke, into: ctx, smoothing: smoothing) }
+                ctx.endTransparencyLayer()
+                ctx.restoreGState()
+            } else {
+                for stroke in layer.strokes { draw(stroke, into: ctx, smoothing: smoothing) }
+            }
         }
     }
 

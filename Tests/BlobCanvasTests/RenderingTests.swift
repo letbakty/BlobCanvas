@@ -60,6 +60,64 @@ final class RasterizerTests: XCTestCase {
     }
 }
 
+final class LayerTests: XCTestCase {
+
+    private func pixel(_ image: CGImage, _ x: Int, _ y: Int) -> (r: UInt8, g: UInt8, b: UInt8, a: UInt8) {
+        let w = image.width, h = image.height
+        var buf = [UInt8](repeating: 0, count: w * h * 4)
+        let ctx = CGContext(data: &buf, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+                            space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+        let i = (y * w + x) * 4
+        return (buf[i], buf[i + 1], buf[i + 2], buf[i + 3])
+    }
+
+    func testLayersRoundTrip() throws {
+        var session = DrawingSession(canvasSize: SIMD2(200, 150))
+        session.commit(Stroke(points: [StrokePoint(x: 10 as Float, y: 10)], color: .black, brushSize: 5))
+        session.addLayer(name: "Ink")
+        session.setOpacity(0.5, ofLayer: 1)
+        session.commit(Stroke(points: [StrokePoint(x: 20 as Float, y: 20)], color: .white, brushSize: 7))
+
+        let decoded = try DrawingSession(serialized: session.serialized())
+        XCTAssertEqual(decoded.layers.count, 2)
+        XCTAssertEqual(decoded.layers[1].name, "Ink")
+        XCTAssertEqual(decoded.layers[1].opacity, 0.5, accuracy: 1e-6)
+        XCTAssertEqual(decoded.activeLayerIndex, 1)
+    }
+
+    func testHiddenLayerNotRendered() {
+        var session = DrawingSession(canvasSize: SIMD2(60, 60))
+        session.commit(Stroke(points: [StrokePoint(x: 5 as Float, y: 30), StrokePoint(x: 55 as Float, y: 30)],
+                              color: StrokeColor(r: 255, g: 0, b: 0), brushSize: 20))
+        session.setVisible(false, ofLayer: 0)
+        let image = StrokeRasterizer.makeImage(session, scale: 1)!
+        XCTAssertLessThan(pixel(image, 30, 30).a, 20) // nothing drawn
+    }
+
+    func testLayerOpacityHalvesAlpha() {
+        var session = DrawingSession(canvasSize: SIMD2(60, 60))
+        session.commit(Stroke(points: [StrokePoint(x: 5 as Float, y: 30), StrokePoint(x: 55 as Float, y: 30)],
+                              color: StrokeColor(r: 0, g: 0, b: 0), brushSize: 30))
+        session.setOpacity(0.5, ofLayer: 0)
+        let image = StrokeRasterizer.makeImage(session, scale: 1, background: nil)!
+        let a = pixel(image, 30, 30).a
+        XCTAssertGreaterThan(a, 100) // ~half of 255
+        XCTAssertLessThan(a, 160)
+    }
+
+    func testUndoIsPerActiveLayer() {
+        var session = DrawingSession(canvasSize: SIMD2(50, 50))
+        session.commit(Stroke(points: [StrokePoint(x: 1 as Float, y: 1)]))
+        session.addLayer()
+        session.commit(Stroke(points: [StrokePoint(x: 2 as Float, y: 2)]))
+        XCTAssertTrue(session.undo())              // undoes layer 2's stroke
+        XCTAssertTrue(session.layers[1].strokes.isEmpty)
+        XCTAssertEqual(session.layers[0].strokes.count, 1) // layer 1 untouched
+    }
+}
+
 final class ExporterTests: XCTestCase {
 
     private func sampleSession() -> DrawingSession {

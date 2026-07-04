@@ -138,12 +138,13 @@ final class CodecTests: XCTestCase {
     /// A blob whose header declares an absurd stroke count must be rejected
     /// before it drives a huge allocation.
     func testImplausibleCountRejected() {
-        // Build a minimal valid v2 header, then an inner payload with a bogus
-        // (varint) stroke count.
+        // Build a minimal valid v4 header, then an inner payload with a bogus
+        // (varint) layer count.
         var payload = Data()
         payload.appendLE(Float(100))                  // canvasW
         payload.appendLE(Float(100))                  // canvasH
-        payload.appendVarint(UInt64.max)              // strokeCount — absurd
+        payload.appendVarint(0)                       // activeLayerIndex
+        payload.appendVarint(UInt64.max)              // layerCount — absurd
 
         var blob = Data()
         blob.append(contentsOf: DrawingBlobCodec.magic)
