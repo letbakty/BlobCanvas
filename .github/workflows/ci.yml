@@ -8,11 +8,11 @@ on:
 jobs:
   test:
     name: Build & test (macOS)
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
-      - name: Select Xcode
-        run: sudo xcode-select -s /Applications/Xcode_15.4.app
+      - name: Select Xcode 16 (Swift 6 toolchain)
+        run: sudo xcode-select -s /Applications/Xcode_16.app
       - name: Swift build & test
         run: swift test --parallel
       - name: Build for iOS Simulator
