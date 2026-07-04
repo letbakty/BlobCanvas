@@ -1,0 +1,54 @@
+{
+  "": {
+    "swift-dependencies": "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvas.build/master.swiftdeps"
+  },
+  "/Users/bakti/Documents/BlobCanvas/Sources/BlobCanvas/Models/DrawingSession.swift": {
+    "dependencies": "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvas.build/DrawingSession.d",
+    "object": "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvas.build/DrawingSession.swift.o",
+    "swiftmodule": "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvas.build/DrawingSession~partial.swiftmodule",
+    "swift-dependencies": "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvas.build/DrawingSession.swiftdeps",
+    "diagnostics": "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvas.build/DrawingSession.dia"
+  },
+  "/Users/bakti/Documents/BlobCanvas/Sources/BlobCanvas/Models/Stroke.swift": {
+    "dependencies": "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvas.build/Stroke.d",
+    "object": "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvas.build/Stroke.swift.o",
+    "swiftmodule": "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvas.build/Stroke~partial.swiftmodule",
+    "swift-dependencies": "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvas.build/Stroke.swiftdeps",
+    "diagnostics": "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvas.build/Stroke.dia"
+  },
+  "/Users/bakti/Documents/BlobCanvas/Sources/BlobCanvas/Models/StrokePoint.swift": {
+    "dependencies": "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvas.build/StrokePoint.d",
+    "object": "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvas.build/StrokePoint.swift.o",
+    "swiftmodule": "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvas.build/StrokePoint~partial.swiftmodule",
+    "swift-dependencies": "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvas.build/StrokePoint.swiftdeps",
+    "diagnostics": "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvas.build/StrokePoint.dia"
+  },
+  "/Users/bakti/Documents/BlobCanvas/Sources/BlobCanvas/Persistence/Drawing.swift": {
+    "dependencies": "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvas.build/Drawing.d",
+    "object": "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvas.build/Drawing.swift.o",
+    "swiftmodule": "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvas.build/Drawing~partial.swiftmodule",
+    "swift-dependencies": "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvas.build/Drawing.swiftdeps",
+    "diagnostics": "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvas.build/Drawing.dia"
+  },
+  "/Users/bakti/Documents/BlobCanvas/Sources/BlobCanvas/Serialization/DrawingBlobCodec.swift": {
+    "dependencies": "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvas.build/DrawingBlobCodec.d",
+    "object": "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvas.build/DrawingBlobCodec.swift.o",
+    "swiftmodule": "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvas.build/DrawingBlobCodec~partial.swiftmodule",
+    "swift-dependencies": "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvas.build/DrawingBlobCodec.swiftdeps",
+    "diagnostics": "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvas.build/DrawingBlobCodec.dia"
+  },
+  "/Users/bakti/Documents/BlobCanvas/Sources/BlobCanvas/Views/BlobCanvasView.swift": {
+    "dependencies": "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvas.build/BlobCanvasView.d",
+    "object": "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvas.build/BlobCanvasView.swift.o",
+    "swiftmodule": "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvas.build/BlobCanvasView~partial.swiftmodule",
+    "swift-dependencies": "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvas.build/BlobCanvasView.swiftdeps",
+    "diagnostics": "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvas.build/BlobCanvasView.dia"
+  },
+  "/Users/bakti/Documents/BlobCanvas/Sources/BlobCanvas/Views/CanvasEngineView.swift": {
+    "dependencies": "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvas.build/CanvasEngineView.d",
+    "object": "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvas.build/CanvasEngineView.swift.o",
+    "swiftmodule": "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvas.build/CanvasEngineView~partial.swiftmodule",
+    "swift-dependencies": "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvas.build/CanvasEngineView.swiftdeps",
+    "diagnostics": "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvas.build/CanvasEngineView.dia"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "": {
+    "swift-dependencies": "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvasTests.build/master.swiftdeps"
+  },
+  "/Users/bakti/Documents/BlobCanvas/Tests/BlobCanvasTests/BlobCanvasTests.swift": {
+    "dependencies": "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvasTests.build/BlobCanvasTests.d",
+    "object": "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvasTests.build/BlobCanvasTests.swift.o",
+    "swiftmodule": "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvasTests.build/BlobCanvasTests~partial.swiftmodule",
+    "swift-dependencies": "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvasTests.build/BlobCanvasTests.swiftdeps",
+    "diagnostics": "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvasTests.build/BlobCanvasTests.dia"
+  }
+}

@@ -1,0 +1,756 @@
+{
+  "builtTestProducts" : [
+    {
+      "binaryPath" : "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvasPackageTests.xctest/Contents/MacOS/BlobCanvasPackageTests",
+      "packagePath" : "/Users/bakti/Documents/BlobCanvas",
+      "productName" : "BlobCanvasPackageTests"
+    }
+  ],
+  "copyCommands" : {
+
+  },
+  "explicitTargetDependencyImportCheckingMode" : {
+    "none" : {
+
+    }
+  },
+  "generatedSourceTargetSet" : [
+
+  ],
+  "pluginDescriptions" : [
+
+  ],
+  "swiftCommands" : {
+    "C.BlobCanvas-arm64-apple-macosx26.0-debug.module" : {
+      "executable" : "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "fileList" : "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvas.build/sources",
+      "importPath" : "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/Modules",
+      "inputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/bakti/Documents/BlobCanvas/Sources/BlobCanvas/Models/DrawingSession.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/bakti/Documents/BlobCanvas/Sources/BlobCanvas/Models/Stroke.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/bakti/Documents/BlobCanvas/Sources/BlobCanvas/Models/StrokePoint.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/bakti/Documents/BlobCanvas/Sources/BlobCanvas/Persistence/Drawing.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/bakti/Documents/BlobCanvas/Sources/BlobCanvas/Serialization/DrawingBlobCodec.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/bakti/Documents/BlobCanvas/Sources/BlobCanvas/Views/BlobCanvasView.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/bakti/Documents/BlobCanvas/Sources/BlobCanvas/Views/CanvasEngineView.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvas.build/sources"
+        }
+      ],
+      "isLibrary" : true,
+      "moduleName" : "BlobCanvas",
+      "moduleOutputPath" : "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/Modules/BlobCanvas.swiftmodule",
+      "objects" : [
+        "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvas.build/DrawingSession.swift.o",
+        "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvas.build/Stroke.swift.o",
+        "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvas.build/StrokePoint.swift.o",
+        "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvas.build/Drawing.swift.o",
+        "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvas.build/DrawingBlobCodec.swift.o",
+        "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvas.build/BlobCanvasView.swift.o",
+        "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvas.build/CanvasEngineView.swift.o"
+      ],
+      "otherArguments" : [
+        "-target",
+        "arm64-apple-macosx14.0",
+        "-incremental",
+        "-enable-batch-mode",
+        "-serialize-diagnostics",
+        "-index-store-path",
+        "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/index/store",
+        "-Onone",
+        "-enable-testing",
+        "-j10",
+        "-DSWIFT_PACKAGE",
+        "-DDEBUG",
+        "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+        "-module-cache-path",
+        "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/ModuleCache",
+        "-parseable-output",
+        "-parse-as-library",
+        "-emit-objc-header",
+        "-emit-objc-header-path",
+        "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvas.build/include/BlobCanvas-Swift.h",
+        "-swift-version",
+        "5",
+        "-enable-upcoming-feature",
+        "StrictConcurrency",
+        "-plugin-path",
+        "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+        "-sdk",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk",
+        "-F",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-F",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks",
+        "-I",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-L",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-g",
+        "-Xcc",
+        "-isysroot",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk",
+        "-Xcc",
+        "-F",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-Xcc",
+        "-F",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks",
+        "-Xcc",
+        "-fPIC",
+        "-Xcc",
+        "-g",
+        "-package-name",
+        "blobcanvas"
+      ],
+      "outputFileMapPath" : "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvas.build/output-file-map.json",
+      "outputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvas.build/DrawingSession.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvas.build/Stroke.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvas.build/StrokePoint.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvas.build/Drawing.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvas.build/DrawingBlobCodec.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvas.build/BlobCanvasView.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvas.build/CanvasEngineView.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/Modules/BlobCanvas.swiftmodule"
+        }
+      ],
+      "prepareForIndexing" : false,
+      "sources" : [
+        "/Users/bakti/Documents/BlobCanvas/Sources/BlobCanvas/Models/DrawingSession.swift",
+        "/Users/bakti/Documents/BlobCanvas/Sources/BlobCanvas/Models/Stroke.swift",
+        "/Users/bakti/Documents/BlobCanvas/Sources/BlobCanvas/Models/StrokePoint.swift",
+        "/Users/bakti/Documents/BlobCanvas/Sources/BlobCanvas/Persistence/Drawing.swift",
+        "/Users/bakti/Documents/BlobCanvas/Sources/BlobCanvas/Serialization/DrawingBlobCodec.swift",
+        "/Users/bakti/Documents/BlobCanvas/Sources/BlobCanvas/Views/BlobCanvasView.swift",
+        "/Users/bakti/Documents/BlobCanvas/Sources/BlobCanvas/Views/CanvasEngineView.swift"
+      ],
+      "tempsPath" : "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvas.build",
+      "wholeModuleOptimization" : false
+    },
+    "C.BlobCanvasPackageTests-arm64-apple-macosx26.0-debug.module" : {
+      "executable" : "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "fileList" : "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvasPackageTests.build/sources",
+      "importPath" : "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/Modules",
+      "inputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvasPackageTests.derived/runner.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/Modules/BlobCanvasTests.swiftmodule"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvasPackageTests.build/sources"
+        }
+      ],
+      "isLibrary" : true,
+      "moduleName" : "BlobCanvasPackageTests",
+      "moduleOutputPath" : "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/Modules/BlobCanvasPackageTests.swiftmodule",
+      "objects" : [
+        "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvasPackageTests.build/runner.swift.o"
+      ],
+      "otherArguments" : [
+        "-target",
+        "arm64-apple-macosx14.0",
+        "-incremental",
+        "-enable-batch-mode",
+        "-serialize-diagnostics",
+        "-index-store-path",
+        "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/index/store",
+        "-Onone",
+        "-enable-testing",
+        "-Xfrontend",
+        "-enable-cross-import-overlays",
+        "-j10",
+        "-DSWIFT_PACKAGE",
+        "-DDEBUG",
+        "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+        "-module-cache-path",
+        "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/ModuleCache",
+        "-parseable-output",
+        "-parse-as-library",
+        "-emit-objc-header",
+        "-emit-objc-header-path",
+        "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvasPackageTests.build/include/BlobCanvasPackageTests-Swift.h",
+        "-plugin-path",
+        "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+        "-sdk",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk",
+        "-F",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-F",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks",
+        "-I",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-L",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-g",
+        "-Xcc",
+        "-isysroot",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk",
+        "-Xcc",
+        "-F",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-Xcc",
+        "-F",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks",
+        "-Xcc",
+        "-fPIC",
+        "-Xcc",
+        "-g",
+        "-package-name",
+        "blobcanvas"
+      ],
+      "outputFileMapPath" : "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvasPackageTests.build/output-file-map.json",
+      "outputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvasPackageTests.build/runner.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/Modules/BlobCanvasPackageTests.swiftmodule"
+        }
+      ],
+      "prepareForIndexing" : false,
+      "sources" : [
+        "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvasPackageTests.derived/runner.swift"
+      ],
+      "tempsPath" : "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvasPackageTests.build",
+      "wholeModuleOptimization" : false
+    },
+    "C.BlobCanvasTests-arm64-apple-macosx26.0-debug.module" : {
+      "executable" : "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "fileList" : "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvasTests.build/sources",
+      "importPath" : "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/Modules",
+      "inputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/bakti/Documents/BlobCanvas/Tests/BlobCanvasTests/BlobCanvasTests.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/Modules/BlobCanvas.swiftmodule"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvasTests.build/sources"
+        }
+      ],
+      "isLibrary" : true,
+      "moduleName" : "BlobCanvasTests",
+      "moduleOutputPath" : "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/Modules/BlobCanvasTests.swiftmodule",
+      "objects" : [
+        "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvasTests.build/BlobCanvasTests.swift.o"
+      ],
+      "otherArguments" : [
+        "-target",
+        "arm64-apple-macosx14.0",
+        "-incremental",
+        "-enable-batch-mode",
+        "-serialize-diagnostics",
+        "-index-store-path",
+        "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/index/store",
+        "-Onone",
+        "-enable-testing",
+        "-Xfrontend",
+        "-enable-cross-import-overlays",
+        "-j10",
+        "-DSWIFT_PACKAGE",
+        "-DDEBUG",
+        "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+        "-module-cache-path",
+        "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/ModuleCache",
+        "-parseable-output",
+        "-parse-as-library",
+        "-swift-version",
+        "5",
+        "-plugin-path",
+        "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+        "-sdk",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk",
+        "-F",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-F",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks",
+        "-I",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-L",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-g",
+        "-Xcc",
+        "-isysroot",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk",
+        "-Xcc",
+        "-F",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-Xcc",
+        "-F",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks",
+        "-Xcc",
+        "-fPIC",
+        "-Xcc",
+        "-g",
+        "-package-name",
+        "blobcanvas"
+      ],
+      "outputFileMapPath" : "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvasTests.build/output-file-map.json",
+      "outputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvasTests.build/BlobCanvasTests.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/Modules/BlobCanvasTests.swiftmodule"
+        }
+      ],
+      "prepareForIndexing" : false,
+      "sources" : [
+        "/Users/bakti/Documents/BlobCanvas/Tests/BlobCanvasTests/BlobCanvasTests.swift"
+      ],
+      "tempsPath" : "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvasTests.build",
+      "wholeModuleOptimization" : false
+    }
+  },
+  "swiftFrontendCommands" : {
+
+  },
+  "swiftTargetScanArgs" : {
+    "BlobCanvas" : [
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "-module-name",
+      "BlobCanvas",
+      "-package-name",
+      "blobcanvas",
+      "-c",
+      "/Users/bakti/Documents/BlobCanvas/Sources/BlobCanvas/Models/DrawingSession.swift",
+      "/Users/bakti/Documents/BlobCanvas/Sources/BlobCanvas/Models/Stroke.swift",
+      "/Users/bakti/Documents/BlobCanvas/Sources/BlobCanvas/Models/StrokePoint.swift",
+      "/Users/bakti/Documents/BlobCanvas/Sources/BlobCanvas/Persistence/Drawing.swift",
+      "/Users/bakti/Documents/BlobCanvas/Sources/BlobCanvas/Serialization/DrawingBlobCodec.swift",
+      "/Users/bakti/Documents/BlobCanvas/Sources/BlobCanvas/Views/BlobCanvasView.swift",
+      "/Users/bakti/Documents/BlobCanvas/Sources/BlobCanvas/Views/CanvasEngineView.swift",
+      "-I",
+      "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/Modules",
+      "-target",
+      "arm64-apple-macosx14.0",
+      "-incremental",
+      "-enable-batch-mode",
+      "-serialize-diagnostics",
+      "-index-store-path",
+      "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/index/store",
+      "-Onone",
+      "-enable-testing",
+      "-j10",
+      "-DSWIFT_PACKAGE",
+      "-DDEBUG",
+      "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+      "-module-cache-path",
+      "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/ModuleCache",
+      "-parseable-output",
+      "-parse-as-library",
+      "-emit-objc-header",
+      "-emit-objc-header-path",
+      "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvas.build/include/BlobCanvas-Swift.h",
+      "-swift-version",
+      "5",
+      "-enable-upcoming-feature",
+      "StrictConcurrency",
+      "-plugin-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+      "-sdk",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk",
+      "-F",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-F",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks",
+      "-I",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-L",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-g",
+      "-Xcc",
+      "-isysroot",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk",
+      "-Xcc",
+      "-F",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-Xcc",
+      "-F",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks",
+      "-Xcc",
+      "-fPIC",
+      "-Xcc",
+      "-g",
+      "-package-name",
+      "blobcanvas",
+      "-driver-use-frontend-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"
+    ],
+    "BlobCanvasPackageTests" : [
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "-module-name",
+      "BlobCanvasPackageTests",
+      "-package-name",
+      "blobcanvas",
+      "-c",
+      "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvasPackageTests.derived/runner.swift",
+      "-I",
+      "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/Modules",
+      "-target",
+      "arm64-apple-macosx14.0",
+      "-incremental",
+      "-enable-batch-mode",
+      "-serialize-diagnostics",
+      "-index-store-path",
+      "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/index/store",
+      "-Onone",
+      "-enable-testing",
+      "-Xfrontend",
+      "-enable-cross-import-overlays",
+      "-j10",
+      "-DSWIFT_PACKAGE",
+      "-DDEBUG",
+      "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+      "-module-cache-path",
+      "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/ModuleCache",
+      "-parseable-output",
+      "-parse-as-library",
+      "-emit-objc-header",
+      "-emit-objc-header-path",
+      "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvasPackageTests.build/include/BlobCanvasPackageTests-Swift.h",
+      "-plugin-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+      "-sdk",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk",
+      "-F",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-F",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks",
+      "-I",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-L",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-g",
+      "-Xcc",
+      "-isysroot",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk",
+      "-Xcc",
+      "-F",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-Xcc",
+      "-F",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks",
+      "-Xcc",
+      "-fPIC",
+      "-Xcc",
+      "-g",
+      "-package-name",
+      "blobcanvas",
+      "-driver-use-frontend-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"
+    ],
+    "BlobCanvasTests" : [
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "-module-name",
+      "BlobCanvasTests",
+      "-package-name",
+      "blobcanvas",
+      "-c",
+      "/Users/bakti/Documents/BlobCanvas/Tests/BlobCanvasTests/BlobCanvasTests.swift",
+      "-I",
+      "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/Modules",
+      "-target",
+      "arm64-apple-macosx14.0",
+      "-incremental",
+      "-enable-batch-mode",
+      "-serialize-diagnostics",
+      "-index-store-path",
+      "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/index/store",
+      "-Onone",
+      "-enable-testing",
+      "-Xfrontend",
+      "-enable-cross-import-overlays",
+      "-j10",
+      "-DSWIFT_PACKAGE",
+      "-DDEBUG",
+      "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+      "-module-cache-path",
+      "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/ModuleCache",
+      "-parseable-output",
+      "-parse-as-library",
+      "-swift-version",
+      "5",
+      "-plugin-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+      "-sdk",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk",
+      "-F",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-F",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks",
+      "-I",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-L",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-g",
+      "-Xcc",
+      "-isysroot",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk",
+      "-Xcc",
+      "-F",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-Xcc",
+      "-F",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks",
+      "-Xcc",
+      "-fPIC",
+      "-Xcc",
+      "-g",
+      "-package-name",
+      "blobcanvas",
+      "-driver-use-frontend-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"
+    ]
+  },
+  "targetDependencyMap" : {
+    "BlobCanvas" : [
+
+    ],
+    "BlobCanvasPackageTests" : [
+      "BlobCanvasTests",
+      "BlobCanvas"
+    ],
+    "BlobCanvasTests" : [
+      "BlobCanvas"
+    ]
+  },
+  "testDiscoveryCommands" : {
+
+  },
+  "testEntryPointCommands" : {
+    "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvasPackageTests.derived/runner.swift" : {
+      "inputs" : [
+
+      ],
+      "outputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvasPackageTests.derived/runner.swift"
+        }
+      ]
+    }
+  },
+  "traitConfiguration" : {
+    "default" : {
+
+    }
+  },
+  "writeCommands" : {
+    "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvas.build/sources" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<sources-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/bakti/Documents/BlobCanvas/Sources/BlobCanvas/Models/DrawingSession.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/bakti/Documents/BlobCanvas/Sources/BlobCanvas/Models/Stroke.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/bakti/Documents/BlobCanvas/Sources/BlobCanvas/Models/StrokePoint.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/bakti/Documents/BlobCanvas/Sources/BlobCanvas/Persistence/Drawing.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/bakti/Documents/BlobCanvas/Sources/BlobCanvas/Serialization/DrawingBlobCodec.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/bakti/Documents/BlobCanvas/Sources/BlobCanvas/Views/BlobCanvasView.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/bakti/Documents/BlobCanvas/Sources/BlobCanvas/Views/CanvasEngineView.swift"
+        }
+      ],
+      "outputFilePath" : "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvas.build/sources"
+    },
+    "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvasPackageTests.build/sources" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<sources-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvasPackageTests.derived/runner.swift"
+        }
+      ],
+      "outputFilePath" : "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvasPackageTests.build/sources"
+    },
+    "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvasPackageTests.product/Objects.LinkFileList" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<link-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvas.build/BlobCanvasView.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvas.build/CanvasEngineView.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvas.build/Drawing.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvas.build/DrawingBlobCodec.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvas.build/DrawingSession.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvas.build/Stroke.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvas.build/StrokePoint.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvasPackageTests.build/runner.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvasTests.build/BlobCanvasTests.swift.o"
+        }
+      ],
+      "outputFilePath" : "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvasPackageTests.product/Objects.LinkFileList"
+    },
+    "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvasTests.build/sources" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<sources-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/bakti/Documents/BlobCanvas/Tests/BlobCanvasTests/BlobCanvasTests.swift"
+        }
+      ],
+      "outputFilePath" : "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/BlobCanvasTests.build/sources"
+    },
+    "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt" : {
+      "alwaysOutOfDate" : true,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<swift-get-version>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"
+        }
+      ],
+      "outputFilePath" : "/Users/bakti/Documents/BlobCanvas/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt"
+    }
+  }
+}
