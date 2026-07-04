@@ -81,6 +81,20 @@ private final class CanvasBuffer {
     func clear() {
         context.clear(CGRect(origin: .zero, size: canvasSize))
     }
+
+    /// An immutable device-oriented copy of the current pixels.
+    func snapshot() -> CGImage? { context.makeImage() }
+
+    /// Restores pixels from a `snapshot()`. Drawn in device space (CTM reset)
+    /// with `.copy` so it fully replaces the buffer — including transparent
+    /// areas — regardless of the canvas flip.
+    func restore(_ image: CGImage) {
+        context.saveGState()
+        context.setBlendMode(.copy)
+        context.concatenate(context.ctm.inverted())
+        context.draw(image, in: CGRect(x: 0, y: 0, width: pixelWidth, height: pixelHeight))
+        context.restoreGState()
+    }
 }
 
 // MARK: - Engine view
@@ -201,19 +215,30 @@ public final class CanvasEngineView: PlatformView {
     @discardableResult
     public func undo() -> Bool {
         guard session.undo() else { return false }
-        rebake()
+        // Fast path: restore a pixel checkpoint for the state we're returning to.
+        if undoCheckpointDepth > 0, let committed,
+           let snapshot = undoCheckpoints.take(key: session.strokes.count) {
+            committed.restore(snapshot)
+            live?.clear()
+            clearPredicted()
+            setNeedsFullDisplay()
+        } else {
+            rebake()   // also invalidates the checkpoint ring
+        }
         onSessionChanged?(session)
         return true
     }
 
     @discardableResult
     public func redo() -> Bool {
+        let preCount = session.strokes.count
         guard session.redo() else { return false }
         // Fast path: the restored stroke can be drawn straight on top when the
         // active layer is topmost/opaque and the stroke isn't an eraser — no
         // need to re-composite everything.
         if let stroke = session.strokes.last, stroke.blendMode == .normal,
            session.activeLayerIsTopOpaque, let committed {
+            checkpointCommitted(preCommitCount: preCount)
             StrokeRasterizer.draw(stroke, into: committed.context, smoothing: smoothing)
             setNeedsFullDisplay()
         } else {
@@ -221,6 +246,13 @@ public final class CanvasEngineView: PlatformView {
         }
         onSessionChanged?(session)
         return true
+    }
+
+    /// Snapshots `committed` (its pre-stroke state) into the checkpoint ring so a
+    /// later undo to `preCommitCount` strokes is O(1). No-op when disabled.
+    private func checkpointCommitted(preCommitCount: Int) {
+        guard undoCheckpointDepth > 0, let snapshot = committed?.snapshot() else { return }
+        undoCheckpoints.push(key: preCommitCount, snapshot)
     }
 
     public func clear() {
@@ -272,6 +304,14 @@ public final class CanvasEngineView: PlatformView {
     /// Cap on backing pixels so zoomed-in re-bakes stay bounded (~8 MP ≈ 3×
     /// a 1024×768@2 canvas). Public so hosts can tune the memory/sharpness trade.
     public var maxBackingPixels: Int = 8_000_000
+
+    /// How many recent commits to keep pixel checkpoints for, making those undos
+    /// O(1) instead of an O(all strokes) re-bake. 0 disables it (default) — each
+    /// checkpoint costs one full-canvas image, so enable it deliberately.
+    public var undoCheckpointDepth: Int = 0 {
+        didSet { undoCheckpoints = CheckpointRing(capacity: undoCheckpointDepth) }
+    }
+    private var undoCheckpoints = CheckpointRing<CGImage>(capacity: 0)
 
     private func displayScale() -> CGFloat {
         #if canImport(UIKit)
@@ -326,6 +366,9 @@ public final class CanvasEngineView: PlatformView {
         StrokeRasterizer.render(session, into: ctx, smoothing: smoothing)
         live?.clear()
         clearPredicted()
+        // A full re-bake regenerates the pixel history (and may change buffer
+        // scale/size), so any pixel checkpoints are now stale.
+        undoCheckpoints.invalidate()
         setNeedsFullDisplay()
     }
 
@@ -455,6 +498,7 @@ public final class CanvasEngineView: PlatformView {
         guard isStroking else { return }
         isStroking = false
         let stroke = liveStroke
+        let preCount = session.strokes.count   // active layer count before commit
         session.commit(stroke)
         if !stroke.points.isEmpty {
             if stroke.blendMode == .erase || !session.activeLayerIsTopOpaque {
@@ -462,7 +506,9 @@ public final class CanvasEngineView: PlatformView {
                 // layers need correct z-order/opacity — re-bake to composite.
                 rebake()
             } else if let committed {
-                // Fast path: top opaque layer — just draw the smoothed ribbon on top.
+                // Fast path: top opaque layer — checkpoint the pre-stroke pixels
+                // (for O(1) undo), then draw the smoothed ribbon on top.
+                checkpointCommitted(preCommitCount: preCount)
                 StrokeRasterizer.draw(stroke, into: committed.context, smoothing: smoothing)
             }
         }
@@ -474,6 +520,20 @@ public final class CanvasEngineView: PlatformView {
         setNeedsFullDisplay()
         onSessionChanged?(session)
     }
+
+    // MARK: - Test hooks (internal)
+
+    /// Commits a stroke through the real commit path (checkpoints included),
+    /// bypassing platform input events. For headless rendering tests.
+    func _commitStrokeForTesting(_ stroke: Stroke) {
+        ensureBuffers()
+        isStroking = true
+        liveStroke = stroke
+        endStroke()
+    }
+
+    /// The current committed pixels, for headless verification.
+    func _committedImageForTesting() -> CGImage? { committed?.snapshot() }
 
     /// Discards the in-progress stroke without committing (e.g. when a zoom/pan
     /// gesture takes over). Re-bakes so any incremental eraser pixels are undone.
