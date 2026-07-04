@@ -3,34 +3,40 @@ import Compression
 
 /// Flat binary codec for `DrawingSession` → single `Data` blob.
 ///
-/// Header scalars are written explicitly little-endian. The point arrays are
-/// bulk-copied in host byte order, which is little-endian on every Apple
-/// platform — so on the platforms this package targets the whole blob is
-/// little-endian. (A big-endian host would need the point copy byte-swapped;
-/// none exist for iOS/macOS, so we keep the fast bulk copy.)
+/// ## Format v2 (current)
+///
+/// Points are **quantized and delta-encoded**, then LZFSE-compressed. Raw
+/// `Float32` coordinates are high-entropy in their low mantissa bits and
+/// compress poorly; quantizing to a fixed grid and storing deltas between
+/// consecutive samples as zig-zag varints shrinks the payload several-fold on
+/// real hand-drawn input (adjacent samples are close, so deltas are tiny).
+///
+/// - Coordinates: fixed-point at 1/32 pt (`coordScale`) — sub-pixel, visually
+///   lossless. Stored as zig-zag varint deltas.
+/// - Pressure: 8-bit (0…255).
+/// - Timestamp: milliseconds (`timeScale`), zig-zag varint delta.
 ///
 /// ```
 /// Outer container:
 ///   magic        4 × UInt8   "BLBC"
-///   version      UInt16      format version (currently 1)
+///   version      UInt16      2
 ///   algorithm    UInt8       0 = raw, 1 = LZFSE
 ///   payload      [UInt8]     (compressed) inner payload
 ///
-/// Inner payload:
+/// Inner payload (v2):
 ///   canvasW      Float32
 ///   canvasH      Float32
-///   strokeCount  UInt32
+///   strokeCount  varint
 ///   strokes:
 ///     r,g,b,a    4 × UInt8
 ///     brushSize  Float32
-///     pointCount UInt32
-///     points     pointCount × 16 bytes  (x, y, pressure, timestamp — Float32 each,
-///                copied in bulk from the contiguous [StrokePoint] buffer)
+///     pointCount varint
+///     points:    (Δx zig-zag varint, Δy zig-zag varint, pressure UInt8, Δt zig-zag varint)
 /// ```
 ///
-/// A 10k-point drawing is ~160 KB raw. LZFSE shrinks smooth strokes a lot but
-/// real jittery input compresses less (float32 mantissas are high-entropy);
-/// expect roughly a 2–5× reduction on hand-drawn data.
+/// ## Format v1 (legacy, decode-only)
+///
+/// Points stored as raw `Float32 × 4` (16 bytes). Still decoded for migration.
 public enum DrawingBlobCodec {
 
     public enum CodecError: Error, Equatable {
@@ -44,37 +50,141 @@ public enum DrawingBlobCodec {
     }
 
     static let magic: [UInt8] = [0x42, 0x4C, 0x42, 0x43] // "BLBC"
-    static let version: UInt16 = 1
-    static let pointStride = MemoryLayout<StrokePoint>.stride // 16
+    static let version: UInt16 = 2
+    static let legacyVersion: UInt16 = 1
+    static let legacyPointStride = MemoryLayout<StrokePoint>.stride // 16
+
+    /// Fixed-point resolution for coordinates: 1/32 pt.
+    static let coordScale: Float = 32
+    /// Fixed-point resolution for timestamps: milliseconds.
+    static let timeScale: Float = 1000
 
     /// Upper bound on points in one stroke, guarding against a corrupt length
     /// field driving a huge allocation. 64M points ≈ 1 GB raw — well beyond any
     /// real drawing, but bounded.
-    static let pointSanityLimit: UInt32 = 64 * 1024 * 1024
+    static let pointSanityLimit: UInt64 = 64 * 1024 * 1024
 
-    // MARK: - Encode
+    // MARK: - Encode (v2)
 
     /// Serializes and LZFSE-compresses a session. Call on auto-save/export
     /// (off the main thread for large drawings), never per frame.
     public static func encode(_ session: DrawingSession, compress: Bool = true) -> Data {
-        var payload = Data(capacity: payloadSize(of: session))
+        var payload = Data(capacity: 8 + session.strokes.count * 8 + session.pointCount * 6)
 
         payload.appendLE(session.canvasSize.x)
         payload.appendLE(session.canvasSize.y)
-        payload.appendLE(UInt32(session.strokes.count))
+        payload.appendVarint(UInt64(session.strokes.count))
 
         for stroke in session.strokes {
             payload.append(contentsOf: [stroke.color.r, stroke.color.g, stroke.color.b, stroke.color.a])
             payload.appendLE(stroke.brushSize)
-            payload.appendLE(UInt32(stroke.points.count))
-            // Bulk copy: [StrokePoint] is a contiguous buffer of 4 Float32s per element.
-            stroke.points.withUnsafeBytes { payload.append(contentsOf: $0) }
+            payload.appendVarint(UInt64(stroke.points.count))
+
+            var px: Int64 = 0, py: Int64 = 0, pt: Int64 = 0
+            for point in stroke.points {
+                let fx = Int64((point.x * coordScale).rounded())
+                let fy = Int64((point.y * coordScale).rounded())
+                let ft = Int64((point.timestamp * timeScale).rounded())
+                payload.appendZigzag(fx - px)
+                payload.appendZigzag(fy - py)
+                payload.append(quantizePressure(point.pressure))
+                payload.appendZigzag(ft - pt)
+                px = fx; py = fy; pt = ft
+            }
         }
 
+        return wrap(payload, version: version, compress: compress)
+    }
+
+    // MARK: - Decode
+
+    public static func decode(_ blob: Data) throws -> DrawingSession {
+        var reader = Reader(blob)
+        guard try reader.readBytes(4).elementsEqual(magic) else { throw CodecError.badMagic }
+        let fileVersion: UInt16 = try reader.readLE()
+
+        switch fileVersion {
+        case version:       return try decodeV2(payload: decompressPayload(&reader))
+        case legacyVersion: return try decodeV1(payload: decompressPayload(&reader))
+        default:            throw CodecError.unsupportedVersion(fileVersion)
+        }
+    }
+
+    private static func decodeV2(payload: Data) throws -> DrawingSession {
+        var body = Reader(payload)
+        let w: Float = try body.readLE()
+        let h: Float = try body.readLE()
+        let strokeCount = try body.readVarint()
+        guard strokeCount <= pointSanityLimit else { throw CodecError.implausibleCount }
+
+        var strokes: [Stroke] = []
+        strokes.reserveCapacity(Int(strokeCount))
+
+        for _ in 0..<strokeCount {
+            let color = StrokeColor(
+                r: try body.readByte(), g: try body.readByte(),
+                b: try body.readByte(), a: try body.readByte()
+            )
+            let brushSize: Float = try body.readLE()
+            let pointCount = try body.readVarint()
+            guard pointCount <= pointSanityLimit else { throw CodecError.implausibleCount }
+
+            var points = [StrokePoint]()
+            points.reserveCapacity(Int(pointCount))
+            var px: Int64 = 0, py: Int64 = 0, pt: Int64 = 0
+            for _ in 0..<pointCount {
+                px += try body.readZigzag()
+                py += try body.readZigzag()
+                let pressure = try body.readByte()
+                pt += try body.readZigzag()
+                points.append(StrokePoint(
+                    x: Float(px) / coordScale,
+                    y: Float(py) / coordScale,
+                    pressure: Float(pressure) / 255,
+                    timestamp: Float(pt) / timeScale
+                ))
+            }
+            strokes.append(Stroke(points: points, color: color, brushSize: brushSize))
+        }
+        return DrawingSession(canvasSize: SIMD2(w, h), strokes: strokes)
+    }
+
+    private static func decodeV1(payload: Data) throws -> DrawingSession {
+        var body = Reader(payload)
+        let w: Float = try body.readLE()
+        let h: Float = try body.readLE()
+        let strokeCount: UInt32 = try body.readLE()
+        guard UInt64(strokeCount) <= pointSanityLimit else { throw CodecError.implausibleCount }
+
+        var strokes: [Stroke] = []
+        strokes.reserveCapacity(Int(strokeCount))
+
+        for _ in 0..<strokeCount {
+            let color = StrokeColor(
+                r: try body.readByte(), g: try body.readByte(),
+                b: try body.readByte(), a: try body.readByte()
+            )
+            let brushSize: Float = try body.readLE()
+            let pointCount: UInt32 = try body.readLE()
+            guard UInt64(pointCount) <= pointSanityLimit else { throw CodecError.implausibleCount }
+
+            let byteCount = Int(pointCount) * legacyPointStride
+            let pointBytes = try body.readBytes(byteCount)
+            let points = [StrokePoint](unsafeUninitializedCapacity: Int(pointCount)) { buffer, initialized in
+                _ = pointBytes.copyBytes(to: buffer)
+                initialized = Int(pointCount)
+            }
+            strokes.append(Stroke(points: points, color: color, brushSize: brushSize))
+        }
+        return DrawingSession(canvasSize: SIMD2(w, h), strokes: strokes)
+    }
+
+    // MARK: - Container helpers
+
+    private static func wrap(_ payload: Data, version: UInt16, compress: Bool) -> Data {
         var blob = Data(capacity: payload.count + 8)
         blob.append(contentsOf: magic)
         blob.appendLE(version)
-
         if compress,
            let compressed = try? (payload as NSData).compressed(using: .lzfse),
            compressed.count < payload.count {
@@ -87,68 +197,24 @@ public enum DrawingBlobCodec {
         return blob
     }
 
-    // MARK: - Decode
-
-    public static func decode(_ blob: Data) throws -> DrawingSession {
-        var reader = Reader(blob)
-
-        guard try reader.readBytes(4).elementsEqual(magic) else { throw CodecError.badMagic }
-        let fileVersion: UInt16 = try reader.readLE()
-        guard fileVersion == version else { throw CodecError.unsupportedVersion(fileVersion) }
-        let algorithm: UInt8 = try reader.readLE()
-
-        let payload: Data
+    private static func decompressPayload(_ reader: inout Reader) throws -> Data {
+        let algorithm: UInt8 = try reader.readByte()
         switch algorithm {
         case 0:
-            payload = try reader.remainder()
+            return try reader.remainder()
         case 1:
             let compressed = try reader.remainder()
             guard let raw = try? (compressed as NSData).decompressed(using: .lzfse) else {
                 throw CodecError.decompressionFailed
             }
-            payload = raw as Data
+            return raw as Data
         default:
             throw CodecError.decompressionFailed
         }
-
-        var body = Reader(payload)
-        let w: Float = try body.readLE()
-        let h: Float = try body.readLE()
-        let strokeCount: UInt32 = try body.readLE()
-        // A stroke count can't exceed the point limit (each stroke has ≥1 point).
-        guard strokeCount <= pointSanityLimit else { throw CodecError.implausibleCount }
-
-        var strokes: [Stroke] = []
-        strokes.reserveCapacity(Int(strokeCount))
-
-        for _ in 0..<strokeCount {
-            // Note: readBytes returns a slice sharing the parent's indices,
-            // so color bytes are read individually rather than subscripted.
-            let color = StrokeColor(
-                r: try body.readLE(), g: try body.readLE(),
-                b: try body.readLE(), a: try body.readLE()
-            )
-            let brushSize: Float = try body.readLE()
-            let pointCount: UInt32 = try body.readLE()
-            guard pointCount <= pointSanityLimit else { throw CodecError.implausibleCount }
-
-            let byteCount = Int(pointCount) * pointStride
-            let pointBytes = try body.readBytes(byteCount)
-            // Bulk copy back into a contiguous [StrokePoint].
-            let points = [StrokePoint](unsafeUninitializedCapacity: Int(pointCount)) { buffer, initialized in
-                _ = pointBytes.copyBytes(to: buffer)
-                initialized = Int(pointCount)
-            }
-            strokes.append(Stroke(points: points, color: color, brushSize: brushSize))
-        }
-
-        return DrawingSession(canvasSize: SIMD2(w, h), strokes: strokes)
     }
 
-    // MARK: - Helpers
-
-    private static func payloadSize(of session: DrawingSession) -> Int {
-        12 + session.strokes.reduce(0) { $0 + 12 + $1.points.count * pointStride }
+    private static func quantizePressure(_ p: Float) -> UInt8 {
+        UInt8((min(max(p, 0), 1) * 255).rounded())
     }
 
     /// Zero-copy sequential reader over a Data blob.
@@ -162,9 +228,15 @@ public enum DrawingBlobCodec {
         }
 
         mutating func readBytes(_ count: Int) throws -> Data {
-            guard data.endIndex - offset >= count else { throw CodecError.truncated }
+            guard count >= 0, data.endIndex - offset >= count else { throw CodecError.truncated }
             defer { offset += count }
             return data[offset..<(offset + count)]
+        }
+
+        mutating func readByte() throws -> UInt8 {
+            guard offset < data.endIndex else { throw CodecError.truncated }
+            defer { offset += 1 }
+            return data[offset]
         }
 
         mutating func readLE<T: FixedWidthInteger>() throws -> T {
@@ -177,12 +249,53 @@ public enum DrawingBlobCodec {
             return Float(bitPattern: raw)
         }
 
+        mutating func readVarint() throws -> UInt64 {
+            var result: UInt64 = 0
+            var shift: UInt64 = 0
+            while true {
+                let byte = try readByte()
+                result |= UInt64(byte & 0x7F) << shift
+                if byte & 0x80 == 0 { break }
+                shift += 7
+                if shift >= 64 { throw CodecError.truncated }
+            }
+            return result
+        }
+
+        mutating func readZigzag() throws -> Int64 {
+            let n = try readVarint()
+            return Int64(bitPattern: (n >> 1) ^ (0 &- (n & 1)))
+        }
+
         mutating func remainder() throws -> Data {
             defer { offset = data.endIndex }
             return data[offset...]
         }
     }
 }
+
+// MARK: - Legacy v1 encoder (test/migration fixtures only)
+
+extension DrawingBlobCodec {
+    /// Produces a version-1 blob (raw `Float32` points). Not used in production
+    /// — kept so the v1 decode path can be exercised and to generate migration
+    /// fixtures.
+    static func encodeLegacyV1(_ session: DrawingSession, compress: Bool = true) -> Data {
+        var payload = Data()
+        payload.appendLE(session.canvasSize.x)
+        payload.appendLE(session.canvasSize.y)
+        payload.appendLE(UInt32(session.strokes.count))
+        for stroke in session.strokes {
+            payload.append(contentsOf: [stroke.color.r, stroke.color.g, stroke.color.b, stroke.color.a])
+            payload.appendLE(stroke.brushSize)
+            payload.appendLE(UInt32(stroke.points.count))
+            stroke.points.withUnsafeBytes { payload.append(contentsOf: $0) }
+        }
+        return wrap(payload, version: legacyVersion, compress: compress)
+    }
+}
+
+// MARK: - Data writing helpers
 
 extension Data {
     @usableFromInline
@@ -193,5 +306,21 @@ extension Data {
     @usableFromInline
     mutating func appendLE(_ value: Float) {
         appendLE(value.bitPattern)
+    }
+
+    /// LEB128 unsigned varint.
+    mutating func appendVarint(_ value: UInt64) {
+        var v = value
+        repeat {
+            var byte = UInt8(v & 0x7F)
+            v >>= 7
+            if v != 0 { byte |= 0x80 }
+            append(byte)
+        } while v != 0
+    }
+
+    /// Zig-zag mapped signed varint (small magnitudes → few bytes).
+    mutating func appendZigzag(_ value: Int64) {
+        appendVarint(UInt64(bitPattern: (value << 1) ^ (value >> 63)))
     }
 }

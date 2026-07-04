@@ -24,13 +24,68 @@ final class CodecTests: XCTestCase {
         return session
     }
 
-    func testRoundTrip() throws {
+    /// v2 quantizes points, so the round trip is lossy within one grid cell:
+    /// 1/32 pt for coordinates, 1/255 for pressure, 1 ms for timestamps.
+    /// Everything else must survive exactly.
+    func testRoundTripWithinQuantizationTolerance() throws {
         let original = makeSession(strokeCount: 50, pointsPerStroke: 200)
         let blob = original.serialized()
         let decoded = try DrawingSession(serialized: blob)
 
         XCTAssertEqual(decoded.canvasSize, original.canvasSize)
+        XCTAssertEqual(decoded.strokes.count, original.strokes.count)
+
+        let coordTol: Float = 1 / 32 / 2 + 1e-4
+        let pressureTol: Float = 1 / 255 / 2 + 1e-4
+        let timeTol: Float = 1 / 1000 / 2 + 1e-4
+        for (a, b) in zip(original.strokes, decoded.strokes) {
+            XCTAssertEqual(a.color, b.color)
+            XCTAssertEqual(a.brushSize, b.brushSize)
+            XCTAssertEqual(a.points.count, b.points.count)
+            for (p, q) in zip(a.points, b.points) {
+                XCTAssertEqual(p.x, q.x, accuracy: coordTol)
+                XCTAssertEqual(p.y, q.y, accuracy: coordTol)
+                XCTAssertEqual(p.pressure, q.pressure, accuracy: pressureTol)
+                XCTAssertEqual(p.timestamp, q.timestamp, accuracy: timeTol)
+            }
+        }
+    }
+
+    /// Once quantized, re-encoding must be byte-identical — proves the codec is
+    /// a stable fixed point (no drift across repeated save cycles).
+    func testReencodeIsStable() throws {
+        let blob1 = makeSession(strokeCount: 20, pointsPerStroke: 100).serialized()
+        let blob2 = try DrawingSession(serialized: blob1).serialized()
+        XCTAssertEqual(blob1, blob2)
+    }
+
+    /// Legacy v1 blobs must still decode (migration path).
+    func testDecodesLegacyV1() throws {
+        let original = makeSession(strokeCount: 10, pointsPerStroke: 80)
+        let v1Blob = DrawingBlobCodec.encodeLegacyV1(original)
+        let decoded = try DrawingBlobCodec.decode(v1Blob)
+        // v1 is lossless, so points match exactly.
         XCTAssertEqual(decoded.strokes, original.strokes)
+    }
+
+    /// Delta+varint must beat raw Float32 storage. Compare uncompressed
+    /// payloads on a random-walk stroke (realistic small deltas).
+    func testDeltaEncodingIsSmallerThanRaw() {
+        var session = DrawingSession(canvasSize: SIMD2(1024, 768))
+        var stroke = Stroke(color: .black, brushSize: 6)
+        var x: Float = 500, y: Float = 400
+        var rng = SystemRandomNumberGenerator()
+        for i in 0..<2000 {
+            x += Float(Int(rng.next() % 7)) - 3
+            y += Float(Int(rng.next() % 7)) - 3
+            stroke.append(StrokePoint(x: x, y: y, pressure: 0.8, timestamp: Float(i) / 120))
+        }
+        session.commit(stroke)
+
+        let v2 = DrawingBlobCodec.encode(session, compress: false).count
+        let v1 = DrawingBlobCodec.encodeLegacyV1(session, compress: false).count
+        XCTAssertLessThan(v2, v1)
+        XCTAssertLessThan(v2, v1 / 2) // expect well over 2× on small-delta input
     }
 
     func testEmptySessionRoundTrip() throws {
@@ -59,11 +114,12 @@ final class CodecTests: XCTestCase {
     /// A blob whose header declares an absurd stroke count must be rejected
     /// before it drives a huge allocation.
     func testImplausibleCountRejected() {
-        // Build a minimal valid header, then an inner payload with a bogus count.
+        // Build a minimal valid v2 header, then an inner payload with a bogus
+        // (varint) stroke count.
         var payload = Data()
         payload.appendLE(Float(100))                  // canvasW
         payload.appendLE(Float(100))                  // canvasH
-        payload.appendLE(UInt32.max)                  // strokeCount — absurd
+        payload.appendVarint(UInt64.max)              // strokeCount — absurd
 
         var blob = Data()
         blob.append(contentsOf: DrawingBlobCodec.magic)
