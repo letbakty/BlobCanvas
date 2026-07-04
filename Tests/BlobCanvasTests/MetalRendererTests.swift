@@ -69,6 +69,18 @@ final class MetalRendererTests: XCTestCase {
         XCTAssertLessThan(pixel(cg, 3, 3).a, 20)
     }
 
+    /// A long stroke tessellates to far more than the 4 KB `setVertexBytes`
+    /// limit — it must render via a real vertex buffer.
+    func testMetalLongStrokeRenders() throws {
+        let renderer = try makeRenderer()
+        var session = DrawingSession(canvasSize: SIMD2(400, 100))
+        var stroke = Stroke(color: StrokeColor(r: 0, g: 0, b: 0), brushSize: 8)
+        for i in 0..<300 { stroke.append(StrokePoint(x: Float(i) + 40, y: 50, timestamp: Float(i) / 120)) }
+        session.commit(stroke)
+        let image = try XCTUnwrap(renderer.makeImage(session, scale: 1))
+        XCTAssertGreaterThan(pixel(image, 200, 50).a, 200) // painted along the line
+    }
+
     func testMetalScaleProducesLargerImage() throws {
         let renderer = try makeRenderer()
         let session = DrawingSession(canvasSize: SIMD2(40, 30))

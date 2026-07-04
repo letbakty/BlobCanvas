@@ -107,15 +107,28 @@ public final class MetalSessionRenderer: SessionImageRenderer {
         var uniforms = Uniforms(canvasSize: SIMD2(Float(session.canvasSize.x), Float(session.canvasSize.y)))
         encoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
 
+        // Tessellate all strokes into one vertex buffer, preserving paint order,
+        // and record per-stroke draw ranges (setVertexBytes caps at 4 KB, so a
+        // real vertex buffer is required for anything but the shortest strokes).
+        var vertices: [Vertex] = []
+        var ranges: [(start: Int, count: Int, erase: Bool)] = []
         for layer in session.layers where layer.isVisible {
             for stroke in layer.strokes {
-                let verts = tessellate(stroke)
-                guard !verts.isEmpty else { continue }
-                encoder.setRenderPipelineState(stroke.blendMode == .erase ? erasePipeline : normalPipeline)
-                verts.withUnsafeBytes { raw in
-                    encoder.setVertexBytes(raw.baseAddress!, length: raw.count, index: 0)
-                }
-                encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: verts.count)
+                let start = vertices.count
+                appendTessellation(of: stroke, into: &vertices)
+                let count = vertices.count - start
+                if count > 0 { ranges.append((start, count, stroke.blendMode == .erase)) }
+            }
+        }
+
+        if !vertices.isEmpty,
+           let buffer = device.makeBuffer(bytes: vertices,
+                                          length: vertices.count * MemoryLayout<Vertex>.stride,
+                                          options: .storageModeShared) {
+            encoder.setVertexBuffer(buffer, offset: 0, index: 0)
+            for range in ranges {
+                encoder.setRenderPipelineState(range.erase ? erasePipeline : normalPipeline)
+                encoder.drawPrimitives(type: .triangle, vertexStart: range.start, vertexCount: range.count)
             }
         }
         encoder.endEncoding()
@@ -127,17 +140,14 @@ public final class MetalSessionRenderer: SessionImageRenderer {
 
     // MARK: - Tessellation
 
-    private func tessellate(_ stroke: Stroke) -> [Vertex] {
+    private func appendTessellation(of stroke: Stroke, into verts: inout [Vertex]) {
         let pts = stroke.points
-        guard !pts.isEmpty else { return [] }
+        guard !pts.isEmpty else { return }
         let c = stroke.color
         // Erasers write alpha=1 into the destination-out blend.
         let color = stroke.blendMode == .erase
             ? SIMD4<Float>(0, 0, 0, 1)
             : SIMD4<Float>(Float(c.r) / 255, Float(c.g) / 255, Float(c.b) / 255, Float(c.a) / 255)
-
-        var verts: [Vertex] = []
-        verts.reserveCapacity(pts.count * 24)
 
         var prev: StrokePoint?
         var prevR: CGFloat = 0
@@ -150,7 +160,6 @@ public final class MetalSessionRenderer: SessionImageRenderer {
             prev = p
             prevR = r
         }
-        return verts
     }
 
     private func appendDisc(_ verts: inout [Vertex], center: CGPoint, radius: CGFloat, color: SIMD4<Float>) {
