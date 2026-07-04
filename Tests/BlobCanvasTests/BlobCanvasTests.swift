@@ -68,6 +68,30 @@ final class CodecTests: XCTestCase {
         XCTAssertEqual(decoded.strokes, original.strokes)
     }
 
+    /// Legacy v2 blobs (delta points, no flags) decode with default flags.
+    func testDecodesLegacyV2() throws {
+        let original = makeSession(strokeCount: 8, pointsPerStroke: 60)
+        let v2Blob = DrawingBlobCodec.encodeLegacyV2(original)
+        let decoded = try DrawingBlobCodec.decode(v2Blob)
+        XCTAssertEqual(decoded.strokes.count, original.strokes.count)
+        XCTAssertEqual(decoded.strokes.first?.blendMode, .normal)
+        XCTAssertEqual(decoded.strokes.first?.dynamics, .pressure)
+    }
+
+    /// Blend mode and width dynamics survive the round trip (v3 flags byte).
+    func testStrokeFlagsRoundTrip() throws {
+        var session = DrawingSession(canvasSize: SIMD2(200, 200))
+        session.commit(Stroke(points: [StrokePoint(x: 1 as Float, y: 2)], color: .black,
+                              brushSize: 5, blendMode: .erase, dynamics: .velocity))
+        session.commit(Stroke(points: [StrokePoint(x: 3 as Float, y: 4)], color: .white,
+                              brushSize: 9, blendMode: .normal, dynamics: .constant))
+        let decoded = try DrawingSession(serialized: session.serialized())
+        XCTAssertEqual(decoded.strokes[0].blendMode, .erase)
+        XCTAssertEqual(decoded.strokes[0].dynamics, .velocity)
+        XCTAssertEqual(decoded.strokes[1].blendMode, .normal)
+        XCTAssertEqual(decoded.strokes[1].dynamics, .constant)
+    }
+
     /// Delta+varint must beat raw Float32 storage. Compare uncompressed
     /// payloads on a random-walk stroke (realistic small deltas).
     func testDeltaEncodingIsSmallerThanRaw() {

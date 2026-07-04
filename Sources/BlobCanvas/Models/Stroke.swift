@@ -27,17 +27,44 @@ public struct StrokeColor: Hashable, Sendable {
     }
 }
 
+/// How a stroke composites onto what is already drawn.
+public enum BlendMode: UInt8, Hashable, Sendable {
+    case normal = 0
+    /// Eraser: clears pixels (renders with `.clear`).
+    case erase = 1
+}
+
+/// What modulates a stroke's width along its length.
+public enum WidthDynamics: UInt8, Hashable, Sendable {
+    /// Width follows per-point pressure (default).
+    case pressure = 0
+    /// Width follows drawing speed — faster is thinner (calligraphic feel).
+    case velocity = 1
+    /// Constant `brushSize`, ignoring pressure and speed.
+    case constant = 2
+}
+
 /// One vector stroke: an ordered run of points plus its brush parameters.
 public struct Stroke: Hashable, Sendable {
     public var points: [StrokePoint]
     public var color: StrokeColor
     /// Brush diameter in canvas points.
     public var brushSize: Float
+    public var blendMode: BlendMode
+    public var dynamics: WidthDynamics
 
-    public init(points: [StrokePoint] = [], color: StrokeColor = .black, brushSize: Float = 8) {
+    public init(
+        points: [StrokePoint] = [],
+        color: StrokeColor = .black,
+        brushSize: Float = 8,
+        blendMode: BlendMode = .normal,
+        dynamics: WidthDynamics = .pressure
+    ) {
         self.points = points
         self.color = color
         self.brushSize = brushSize
+        self.blendMode = blendMode
+        self.dynamics = dynamics
     }
 
     @inlinable

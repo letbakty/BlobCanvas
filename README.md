@@ -24,10 +24,22 @@ DrawingBlobCodec (flat binary + LZFSE)
 | `StrokePoint` | [StrokePoint.swift](Sources/BlobCanvas/Models/StrokePoint.swift) | 16-byte POD point (x, y, pressure, timestamp) |
 | `Stroke` / `StrokeColor` | [Stroke.swift](Sources/BlobCanvas/Models/Stroke.swift) | Point run + RGBA color + brush size |
 | `DrawingSession` | [DrawingSession.swift](Sources/BlobCanvas/Models/DrawingSession.swift) | In-memory state, O(1) undo/redo stacks |
-| `DrawingBlobCodec` | [DrawingBlobCodec.swift](Sources/BlobCanvas/Serialization/DrawingBlobCodec.swift) | Flat little-endian binary + LZFSE compression |
+| `DrawingBlobCodec` | [DrawingBlobCodec.swift](Sources/BlobCanvas/Serialization/DrawingBlobCodec.swift) | Delta+quantized binary (v3) + LZFSE; v1/v2 decode |
 | `Drawing` | [Drawing.swift](Sources/BlobCanvas/Persistence/Drawing.swift) | SwiftData `@Model` holding the blob + metadata |
+| `StrokeRasterizer` | [StrokeRasterizer.swift](Sources/BlobCanvas/Rendering/StrokeRasterizer.swift) | Pure ribbon geometry: smoothing, velocity width, blend modes |
+| `DrawingExporter` | [DrawingExporter.swift](Sources/BlobCanvas/Rendering/DrawingExporter.swift) | PNG / PDF / SVG / thumbnail export |
+| `DrawingPlayer` | [DrawingPlayer.swift](Sources/BlobCanvas/Rendering/DrawingPlayer.swift) | Timestamp-driven replay of drawing creation |
 | `CanvasEngineView` | [CanvasEngineView.swift](Sources/BlobCanvas/Views/CanvasEngineView.swift) | Bitmap-backed renderer, UIKit/AppKit input |
 | `BlobCanvasView` | [BlobCanvasView.swift](Sources/BlobCanvas/Views/BlobCanvasView.swift) | SwiftUI wrapper + `BlobCanvasController` |
+
+## Brushes & features
+
+- **Blend modes.** `brushBlendMode = .erase` clears pixels in real time; erasers persist as strokes (undoable).
+- **Width dynamics.** `brushDynamics` is `.pressure` (default), `.velocity` (faster = thinner, calligraphic), or `.constant`.
+- **Smoothing.** Committed strokes are Catmull-Rom interpolated (`smoothing`), while the live preview stays polyline for latency.
+- **Palm rejection.** `pencilOnly = true` draws only from Apple Pencil, ignoring finger/palm touches.
+- **Export.** `DrawingExporter.pngData / pdfData / svgString / thumbnailPNG`.
+- **Replay.** `DrawingPlayer(session).snapshot(at:)` reconstructs the drawing at any point in its creation from the captured timestamps.
 
 ## Why it's fast
 

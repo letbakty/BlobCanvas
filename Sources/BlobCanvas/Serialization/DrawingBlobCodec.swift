@@ -50,8 +50,7 @@ public enum DrawingBlobCodec {
     }
 
     static let magic: [UInt8] = [0x42, 0x4C, 0x42, 0x43] // "BLBC"
-    static let version: UInt16 = 2
-    static let legacyVersion: UInt16 = 1
+    static let version: UInt16 = 3
     static let legacyPointStride = MemoryLayout<StrokePoint>.stride // 16
 
     /// Fixed-point resolution for coordinates: 1/32 pt.
@@ -77,6 +76,7 @@ public enum DrawingBlobCodec {
 
         for stroke in session.strokes {
             payload.append(contentsOf: [stroke.color.r, stroke.color.g, stroke.color.b, stroke.color.a])
+            payload.append(flags(for: stroke))
             payload.appendLE(stroke.brushSize)
             payload.appendVarint(UInt64(stroke.points.count))
 
@@ -104,13 +104,16 @@ public enum DrawingBlobCodec {
         let fileVersion: UInt16 = try reader.readLE()
 
         switch fileVersion {
-        case version:       return try decodeV2(payload: decompressPayload(&reader))
-        case legacyVersion: return try decodeV1(payload: decompressPayload(&reader))
-        default:            throw CodecError.unsupportedVersion(fileVersion)
+        case 3: return try decodeDelta(payload: decompressPayload(&reader), hasFlags: true)
+        case 2: return try decodeDelta(payload: decompressPayload(&reader), hasFlags: false)
+        case 1: return try decodeV1(payload: decompressPayload(&reader))
+        default: throw CodecError.unsupportedVersion(fileVersion)
         }
     }
 
-    private static func decodeV2(payload: Data) throws -> DrawingSession {
+    /// Shared decoder for the delta point format. `hasFlags` distinguishes v3
+    /// (per-stroke blend/dynamics byte) from v2 (no such byte).
+    private static func decodeDelta(payload: Data, hasFlags: Bool) throws -> DrawingSession {
         var body = Reader(payload)
         let w: Float = try body.readLE()
         let h: Float = try body.readLE()
@@ -125,6 +128,8 @@ public enum DrawingBlobCodec {
                 r: try body.readByte(), g: try body.readByte(),
                 b: try body.readByte(), a: try body.readByte()
             )
+            let (blendMode, dynamics): (BlendMode, WidthDynamics) =
+                hasFlags ? decodeFlags(try body.readByte()) : (.normal, .pressure)
             let brushSize: Float = try body.readLE()
             let pointCount = try body.readVarint()
             guard pointCount <= pointSanityLimit else { throw CodecError.implausibleCount }
@@ -144,9 +149,22 @@ public enum DrawingBlobCodec {
                     timestamp: Float(pt) / timeScale
                 ))
             }
-            strokes.append(Stroke(points: points, color: color, brushSize: brushSize))
+            strokes.append(Stroke(points: points, color: color, brushSize: brushSize,
+                                  blendMode: blendMode, dynamics: dynamics))
         }
         return DrawingSession(canvasSize: SIMD2(w, h), strokes: strokes)
+    }
+
+    // MARK: - Stroke flags
+
+    private static func flags(for stroke: Stroke) -> UInt8 {
+        (stroke.blendMode == .erase ? 1 : 0) | (stroke.dynamics.rawValue << 1)
+    }
+
+    private static func decodeFlags(_ byte: UInt8) -> (BlendMode, WidthDynamics) {
+        let blend: BlendMode = (byte & 1) == 1 ? .erase : .normal
+        let dynamics = WidthDynamics(rawValue: (byte >> 1) & 0x3) ?? .pressure
+        return (blend, dynamics)
     }
 
     private static func decodeV1(payload: Data) throws -> DrawingSession {
@@ -291,7 +309,32 @@ extension DrawingBlobCodec {
             payload.appendLE(UInt32(stroke.points.count))
             stroke.points.withUnsafeBytes { payload.append(contentsOf: $0) }
         }
-        return wrap(payload, version: legacyVersion, compress: compress)
+        return wrap(payload, version: 1, compress: compress)
+    }
+
+    /// Produces a version-2 blob (delta points, no per-stroke flags). Test-only,
+    /// for exercising the v2 → current migration path.
+    static func encodeLegacyV2(_ session: DrawingSession, compress: Bool = true) -> Data {
+        var payload = Data()
+        payload.appendLE(session.canvasSize.x)
+        payload.appendLE(session.canvasSize.y)
+        payload.appendVarint(UInt64(session.strokes.count))
+        for stroke in session.strokes {
+            payload.append(contentsOf: [stroke.color.r, stroke.color.g, stroke.color.b, stroke.color.a])
+            payload.appendLE(stroke.brushSize)
+            payload.appendVarint(UInt64(stroke.points.count))
+            var px: Int64 = 0, py: Int64 = 0, pt: Int64 = 0
+            for point in stroke.points {
+                let fx = Int64((point.x * coordScale).rounded())
+                let fy = Int64((point.y * coordScale).rounded())
+                let ft = Int64((point.timestamp * timeScale).rounded())
+                payload.appendZigzag(fx - px); payload.appendZigzag(fy - py)
+                payload.append(UInt8((min(max(point.pressure, 0), 1) * 255).rounded()))
+                payload.appendZigzag(ft - pt)
+                px = fx; py = fy; pt = ft
+            }
+        }
+        return wrap(payload, version: 2, compress: compress)
     }
 }
 

@@ -35,7 +35,7 @@ private final class CanvasBuffer {
         let byteCount = bpr * h
         guard let data = calloc(byteCount, 1) else { return nil }
 
-        let space = CGColorSpaceCreateDeviceRGB()
+        let space = StrokeRasterizer.colorSpace   // sRGB, matches StrokeColor
         let bitmapInfo = CGImageAlphaInfo.premultipliedFirst.rawValue
             | CGBitmapInfo.byteOrder32Little.rawValue
         guard let ctx = CGContext(
@@ -71,7 +71,7 @@ private final class CanvasBuffer {
         CGImage(
             width: pixelWidth, height: pixelHeight,
             bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: bytesPerRow,
-            space: CGColorSpaceCreateDeviceRGB(),
+            space: StrokeRasterizer.colorSpace,
             bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedFirst.rawValue
                 | CGBitmapInfo.byteOrder32Little.rawValue),
             provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent
@@ -113,6 +113,16 @@ public final class CanvasEngineView: PlatformView {
 
     public var brushColor: StrokeColor = .black
     public var brushSize: Float = 8
+    public var brushBlendMode: BlendMode = .normal
+    public var brushDynamics: WidthDynamics = .pressure
+
+    /// When true, only Apple Pencil input draws — finger and palm touches are
+    /// rejected (palm rejection).
+    public var pencilOnly: Bool = false
+
+    /// Smooth committed strokes with Catmull-Rom interpolation (live preview
+    /// stays polyline for latency; commit is the smoothed authoritative render).
+    public var smoothing: Bool = true
 
     /// Fired after a stroke is committed or undo/redo/clear mutates history.
     public var onSessionChanged: ((DrawingSession) -> Void)?
@@ -135,6 +145,8 @@ public final class CanvasEngineView: PlatformView {
     /// Maps a touch's `estimationUpdateIndex` to the index of the point it
     /// produced in `liveStroke`, so late-arriving force values can patch it.
     private var estimationMap: [NSNumber: Int] = [:]
+    /// The touch currently drawing, so mid-stroke finger touches are ignored.
+    private weak var activeTouch: UITouch?
     #endif
 
     // MARK: - Init
@@ -237,9 +249,7 @@ public final class CanvasEngineView: PlatformView {
     private func rebake() {
         guard let ctx = committed?.context else { return }
         ctx.clear(CGRect(origin: .zero, size: canvasSize))
-        for stroke in session.strokes {
-            fillRibbon(stroke, into: ctx, color: stroke.color)
-        }
+        StrokeRasterizer.render(session, into: ctx, smoothing: smoothing)
         live?.clear()
         clearPredicted()
         setNeedsFullDisplay()
@@ -272,58 +282,12 @@ public final class CanvasEngineView: PlatformView {
                       width: r.width * f.scale, height: r.height * f.scale)
     }
 
-    // MARK: - Ribbon geometry (canvas space)
-
-    private func halfWidth(_ p: StrokePoint, _ stroke: Stroke) -> CGFloat {
-        max(CGFloat(stroke.brushSize) * CGFloat(p.pressure) * 0.5, 0.25)
-    }
-
-    /// Adds the round dot for a single point.
-    private func addDot(_ path: CGMutablePath, at p: StrokePoint, radius r: CGFloat) {
-        path.addEllipse(in: CGRect(x: CGFloat(p.x) - r, y: CGFloat(p.y) - r, width: r * 2, height: r * 2))
-    }
-
-    /// Adds the trapezoid connecting two variable-radius points.
-    private func addQuad(_ path: CGMutablePath, from a: StrokePoint, to b: StrokePoint, ra: CGFloat, rb: CGFloat) {
-        let dx = CGFloat(b.x - a.x), dy = CGFloat(b.y - a.y)
-        let len = (dx * dx + dy * dy).squareRoot()
-        guard len > 1e-4 else { return }
-        let nx = -dy / len, ny = dx / len
-        path.move(to: CGPoint(x: CGFloat(a.x) + nx * ra, y: CGFloat(a.y) + ny * ra))
-        path.addLine(to: CGPoint(x: CGFloat(b.x) + nx * rb, y: CGFloat(b.y) + ny * rb))
-        path.addLine(to: CGPoint(x: CGFloat(b.x) - nx * rb, y: CGFloat(b.y) - ny * rb))
-        path.addLine(to: CGPoint(x: CGFloat(a.x) - nx * ra, y: CGFloat(a.y) - ny * ra))
-        path.closeSubpath()
-    }
-
-    /// Flattens a whole stroke into a single `fillPath`. One fill = one coverage
-    /// pass, so self-overlaps never double-blend even for translucent colors.
-    private func fillRibbon(_ stroke: Stroke, into ctx: CGContext, color: StrokeColor) {
-        let pts = stroke.points
-        guard let first = pts.first else { return }
-        let path = CGMutablePath()
-        if pts.count == 1 {
-            addDot(path, at: first, radius: halfWidth(first, stroke))
-        } else {
-            var prevR = halfWidth(first, stroke)
-            addDot(path, at: first, radius: prevR)
-            for i in 1..<pts.count {
-                let r = halfWidth(pts[i], stroke)
-                addDot(path, at: pts[i], radius: r)
-                addQuad(path, from: pts[i - 1], to: pts[i], ra: prevR, rb: r)
-                prevR = r
-            }
-        }
-        ctx.setFillColor(color.cgColor)
-        ctx.addPath(path)
-        ctx.fillPath()
-    }
-
     // MARK: - Live input (hot path)
 
     private func beginStroke(atCanvas p: CGPoint, pressure: CGFloat) {
         ensureBuffers()
-        liveStroke = Stroke(points: [], color: brushColor, brushSize: brushSize)
+        liveStroke = Stroke(points: [], color: brushColor, brushSize: brushSize,
+                            blendMode: brushBlendMode, dynamics: brushDynamics)
         liveStroke.points.reserveCapacity(2048)
         liveStrokeStartTime = CACurrentMediaTime()
         isStroking = true
@@ -334,41 +298,51 @@ public final class CanvasEngineView: PlatformView {
         appendLivePoint(atCanvas: p, pressure: pressure)
     }
 
-    /// Appends one point and incrementally fills only its new joint into `live`
-    /// (opaque — alpha is applied once at present time).
+    /// Appends one point and incrementally fills only its new joint. Normal
+    /// strokes go into `live` (opaque, alpha applied at present); erasers clear
+    /// straight into `committed` for real-time feedback.
     /// - Returns: `true` if the point was appended (not skipped as too close).
     @discardableResult
     private func appendLivePoint(atCanvas point: CGPoint, pressure: CGFloat) -> Bool {
-        guard isStroking, let live else { return false }
+        guard isStroking else { return false }
+        let last = liveStroke.points.last
+        if let last {
+            let dx = point.x - CGFloat(last.x), dy = point.y - CGFloat(last.y)
+            guard dx * dx + dy * dy > 0.0625 else { return false } // skip sub-quarter-point moves
+        }
         let p = StrokePoint(
             x: point.x, y: point.y, pressure: pressure,
             timestamp: Float(CACurrentMediaTime() - liveStrokeStartTime)
         )
 
-        var opaque = liveStroke.color
-        opaque.a = 255
-        let ctx = live.context
-        ctx.setFillColor(opaque.cgColor)
-
-        let r = halfWidth(p, liveStroke)
-        let dirty: CGRect
+        let r = StrokeRasterizer.halfWidth(p, previous: last, liveStroke)
+        let from = last.map { ($0.cgPoint, StrokeRasterizer.halfWidth($0, previous: nil, liveStroke)) }
         let path = CGMutablePath()
-        if let last = liveStroke.points.last {
-            let dx = p.x - last.x, dy = p.y - last.y
-            guard dx * dx + dy * dy > 0.0625 else { return false } // skip sub-quarter-point moves
-            let lastR = halfWidth(last, liveStroke)
-            addDot(path, at: p, radius: r)
-            addQuad(path, from: last, to: p, ra: lastR, rb: r)
-            dirty = CGRect(x: CGFloat(min(last.x, p.x)), y: CGFloat(min(last.y, p.y)),
-                           width: CGFloat(abs(dx)), height: CGFloat(abs(dy)))
+        StrokeRasterizer.addIncrementalJoint(path, from: from, to: (p.cgPoint, r))
+
+        let isErase = liveStroke.blendMode == .erase
+        guard let ctx = (isErase ? committed : live)?.context else { return false }
+        ctx.saveGState()
+        if isErase {
+            ctx.setBlendMode(.clear)
+            ctx.setFillColor(StrokeColor.black.cgColor)
         } else {
-            addDot(path, at: p, radius: r)
-            dirty = CGRect(x: point.x, y: point.y, width: 0, height: 0)
+            var opaque = liveStroke.color
+            opaque.a = 255
+            ctx.setFillColor(opaque.cgColor)
         }
         ctx.addPath(path)
         ctx.fillPath()
-        liveStroke.points.append(p)
+        ctx.restoreGState()
 
+        let dirty: CGRect
+        if let last {
+            dirty = CGRect(x: CGFloat(min(last.x, p.x)), y: CGFloat(min(last.y, p.y)),
+                           width: CGFloat(abs(p.x - last.x)), height: CGFloat(abs(p.y - last.y)))
+        } else {
+            dirty = CGRect(x: point.x, y: point.y, width: 0, height: 0)
+        }
+        liveStroke.points.append(p)
         setNeedsDisplay(viewDirtyRect(canvas: dirty))
         return true
     }
@@ -377,8 +351,9 @@ public final class CanvasEngineView: PlatformView {
         guard isStroking else { return }
         isStroking = false
         if !liveStroke.points.isEmpty, let committed {
-            // Authoritative render: single filled ribbon with the real alpha.
-            fillRibbon(liveStroke, into: committed.context, color: liveStroke.color)
+            // Authoritative render (smoothed). For erasers this re-applies the
+            // clear over the incremental preview — idempotent.
+            StrokeRasterizer.draw(liveStroke, into: committed.context, smoothing: smoothing)
         }
         live?.clear()
         clearPredicted()
@@ -396,7 +371,10 @@ public final class CanvasEngineView: PlatformView {
     /// predicted canvas points into the `predicted` buffer. Reduces perceived
     /// pen latency by ~1 frame; the tail is discarded on the next real event.
     private func renderPredicted(canvasPoints tail: [CGPoint]) {
-        guard isStroking, let predicted, let anchor = liveStroke.points.last else { return }
+        // Erasers write straight into `committed`, so there is nothing to
+        // preview-and-roll-back; skip prediction for them.
+        guard isStroking, liveStroke.blendMode == .normal,
+              let predicted, let anchor = liveStroke.points.last else { return }
         let oldRegion = predictedBBox
 
         var stroke = liveStroke
@@ -406,9 +384,10 @@ public final class CanvasEngineView: PlatformView {
         }
         predicted.context.clear(oldRegion.isNull ? CGRect(origin: .zero, size: canvasSize) : oldRegion)
 
-        var opaque = liveStroke.color
+        var opaque = stroke.color
         opaque.a = 255
-        fillRibbon(stroke, into: predicted.context, color: opaque)
+        stroke.color = opaque
+        StrokeRasterizer.draw(stroke, into: predicted.context, smoothing: false)
         predictedBBox = strokeBBox(stroke)
 
         var dirty = oldRegion
@@ -498,13 +477,22 @@ public final class CanvasEngineView: PlatformView {
 
 #if canImport(UIKit)
 extension CanvasEngineView {
+    /// Picks the touch to draw with: prefers an Apple Pencil, and when
+    /// `pencilOnly` is set, rejects finger/palm touches entirely.
+    private func drawingTouch(in touches: Set<UITouch>) -> UITouch? {
+        if let pencil = touches.first(where: { $0.type == .pencil }) { return pencil }
+        if pencilOnly { return nil }
+        return touches.first
+    }
+
     public override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
-        guard let touch = touches.first else { return }
+        guard let touch = drawingTouch(in: touches) else { return }
+        activeTouch = touch
         beginStroke(atCanvas: viewToCanvas(touch.location(in: self)), pressure: normalizedForce(touch))
     }
 
     public override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
-        guard let touch = touches.first else { return }
+        guard let touch = activeTouch ?? drawingTouch(in: touches) else { return }
         // Coalesced touches deliver the full 120/240 Hz sample stream even
         // when the display refreshes slower — critical for smooth curves.
         for t in event?.coalescedTouches(for: touch) ?? [touch] {
@@ -539,13 +527,15 @@ extension CanvasEngineView {
     }
 
     public override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
-        if let touch = touches.first {
-            appendLivePoint(atCanvas: viewToCanvas(touch.location(in: self)), pressure: normalizedForce(touch))
-        }
+        guard let touch = activeTouch, touches.contains(touch) else { return }
+        appendLivePoint(atCanvas: viewToCanvas(touch.location(in: self)), pressure: normalizedForce(touch))
+        activeTouch = nil
         endStroke()
     }
 
     public override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard activeTouch == nil || touches.contains(activeTouch!) else { return }
+        activeTouch = nil
         endStroke()
     }
 
