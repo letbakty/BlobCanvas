@@ -23,6 +23,15 @@ public final class BlobCanvasController {
     public func undo() { engineView?.undo() }
     public func redo() { engineView?.redo() }
     public func clear() { engineView?.clear() }
+    public func resetZoom() { engineView?.resetZoom() }
+
+    /// Enables O(1) undo for the most recent `depth` steps (see the engine).
+    public func setUndoCheckpointDepth(_ depth: Int) { engineView?.undoCheckpointDepth = depth }
+
+    /// Rasterizes the current drawing (all layers) to an image, e.g. for export.
+    public func makeImage(scale: CGFloat = 2, background: StrokeColor? = nil) -> CGImage? {
+        StrokeRasterizer.makeImage(snapshot(), scale: scale, background: background)
+    }
 
     // Layer controls
     public func addLayer(name: String? = nil) { engineView?.addLayer(name: name) }
@@ -59,17 +68,29 @@ public struct BlobCanvasView {
     let controller: BlobCanvasController
     var brushColor: StrokeColor
     var brushSize: Float
+    var brushBlendMode: BlendMode
+    var brushDynamics: WidthDynamics
+    var smoothing: Bool
+    var pencilOnly: Bool
     var initialSession: DrawingSession?
 
     public init(
         controller: BlobCanvasController,
         brushColor: StrokeColor = .black,
         brushSize: Float = 8,
+        blendMode: BlendMode = .normal,
+        dynamics: WidthDynamics = .pressure,
+        smoothing: Bool = true,
+        pencilOnly: Bool = false,
         session: DrawingSession? = nil
     ) {
         self.controller = controller
         self.brushColor = brushColor
         self.brushSize = brushSize
+        self.brushBlendMode = blendMode
+        self.brushDynamics = dynamics
+        self.smoothing = smoothing
+        self.pencilOnly = pencilOnly
         self.initialSession = session
     }
 
@@ -90,6 +111,10 @@ public struct BlobCanvasView {
     func update(_ view: CanvasEngineView) {
         view.brushColor = brushColor
         view.brushSize = brushSize
+        view.brushBlendMode = brushBlendMode
+        view.brushDynamics = brushDynamics
+        view.smoothing = smoothing
+        view.pencilOnly = pencilOnly
     }
 }
 
