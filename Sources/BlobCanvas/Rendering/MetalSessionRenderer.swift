@@ -173,10 +173,17 @@ public final class MetalSessionRenderer: SessionImageRenderer, @unchecked Sendab
             ? SIMD4<Float>(0, 0, 0, 1)
             : SIMD4<Float>(Float(c.r) / 255, Float(c.g) / 255, Float(c.b) / 255, Float(c.a) / 255)
 
+        // Body = quads; round caps only at the ends and sharp turns (matching
+        // the CG outline). Avoids a full disc fan at every sample — far fewer
+        // triangles.
+        let n = centers.count
         appendDisc(&verts, center: centers[0], radius: radii[0], color: color)
-        for i in 1..<centers.count {
-            appendDisc(&verts, center: centers[i], radius: radii[i], color: color)
+        if n > 1 { appendDisc(&verts, center: centers[n - 1], radius: radii[n - 1], color: color) }
+        for i in 1..<n {
             appendQuad(&verts, from: centers[i - 1], to: centers[i], ra: radii[i - 1], rb: radii[i], color: color)
+            if i < n - 1, StrokeRasterizer.isSharpTurn(centers, i) {
+                appendDisc(&verts, center: centers[i], radius: radii[i], color: color)
+            }
         }
     }
 

@@ -128,15 +128,16 @@ public enum StrokeRasterizer {
         // large drawings — and, being one simple contour, it can't self-cancel
         // into holes. Beveled interior joins are sub-pixel on smoothed strokes.
         let n = centers.count
+        let normals = (0..<n).map { vertexNormal(centers, $0) }   // computed once
         var outline = [CGPoint]()
         outline.reserveCapacity(n * 2)
         for i in 0..<n {
-            let nrm = vertexNormal(centers, i)
-            outline.append(CGPoint(x: centers[i].x + nrm.dx * radii[i], y: centers[i].y + nrm.dy * radii[i]))
+            outline.append(CGPoint(x: centers[i].x + normals[i].dx * radii[i],
+                                   y: centers[i].y + normals[i].dy * radii[i]))
         }
         for i in stride(from: n - 1, through: 0, by: -1) {
-            let nrm = vertexNormal(centers, i)
-            outline.append(CGPoint(x: centers[i].x - nrm.dx * radii[i], y: centers[i].y - nrm.dy * radii[i]))
+            outline.append(CGPoint(x: centers[i].x - normals[i].dx * radii[i],
+                                   y: centers[i].y - normals[i].dy * radii[i]))
         }
         // Wind consistently with `addEllipse` so the caps union cleanly.
         if signedArea(outline) < 0 { outline.reverse() }
@@ -156,7 +157,7 @@ public enum StrokeRasterizer {
     }
 
     /// True when the direction changes by more than ~60° at vertex `i`.
-    private static func isSharpTurn(_ centers: [CGPoint], _ i: Int) -> Bool {
+    static func isSharpTurn(_ centers: [CGPoint], _ i: Int) -> Bool {
         let ax = centers[i].x - centers[i - 1].x, ay = centers[i].y - centers[i - 1].y
         let bx = centers[i + 1].x - centers[i].x, by = centers[i + 1].y - centers[i].y
         let la = (ax * ax + ay * ay).squareRoot(), lb = (bx * bx + by * by).squareRoot()
@@ -199,6 +200,7 @@ public enum StrokeRasterizer {
         var centers = [CGPoint]()
         var radii = [CGFloat]()
         centers.reserveCapacity(pts.count * 4)
+        radii.reserveCapacity(pts.count * 4)
 
         func point(_ i: Int) -> CGPoint { pts[min(max(i, 0), pts.count - 1)].cgPoint }
         func radius(_ i: Int) -> CGFloat { baseRadii[min(max(i, 0), baseRadii.count - 1)] }
