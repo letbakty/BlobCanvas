@@ -111,7 +111,7 @@ Key property: **`Models` and `Rendering` have no UIKit/AppKit dependency**, so t
 
 `present()` blits `committed` (α=1) + `live` (α=brush alpha) + `predicted` (α=brush alpha) into the `CanvasViewport.drawnRect`. Translucency is correct because a whole stroke is one `fillPath` (single coverage) and the live overlay is composited once with its alpha.
 
-`StrokeRasterizer` is the single source of ribbon geometry: circles at points + trapezoids between them, Catmull-Rom smoothing on commit, width from pressure/velocity/constant, `.normal`/`.erase` blend, and per-layer compositing (transparency groups so erasers stay layer-local).
+`StrokeRasterizer` is the single source of ribbon geometry: a whole stroke is one **offset-outline contour** (left side forward, right side back) plus round-cap discs at the ends and at sharp turns — O(N) line segments, ~15–20× faster than an `addEllipse` per sample and hole-free by construction. All contours are wound to match `addEllipse` (via `signedArea`) so the single non-zero-winding fill computes a clean union. Catmull-Rom smoothing on commit, width from pressure/velocity/constant, `.normal`/`.erase` blend, and per-layer compositing (transparency groups so erasers stay layer-local).
 
 ## Persistence & format
 
@@ -133,11 +133,11 @@ Versions (all still decodable — `decode` dispatches per version):
 
 - **Codec:** round-trip (tolerance), stable re-encode (idempotent), legacy v1/v2 decode, implausible-count rejection, **fuzzing** (3000 hostile/corrupted decodes must never trap) via a seeded SplitMix64 RNG, and **safety hardening** (`CodecSafetyTests`: NaN/Inf canvas & brush, amplified counts, huge frame lengths, Int64 accumulator overflow — none may trap or OOM).
 - **Incremental:** matches one-shot, undo recompacts, multi-layer, sealed frames reused.
-- **Rendering (headless golden-pixel):** render session → `CGImage` → read a pixel → assert channels. Covers CG and Metal (skipped without a GPU), eraser clears, background fill, scale, layer opacity/visibility, and CG↔Metal agreement for opaque strokes.
+- **Rendering (headless golden-pixel):** render session → `CGImage` → read a pixel → assert channels. Covers CG and Metal (skipped without a GPU), eraser clears, background fill, scale, layer opacity/visibility, Metal layer-local erase, CG↔Metal agreement for opaque strokes, and **stroke coverage vs a `CGContext.strokePath` reference** to catch winding holes.
 - **Viewport:** fit centering, round-trip mapping, focal-point-preserving zoom, clamping.
 
 ## Improvements / known gaps
 
-Recently closed: crisp zoom (canvas re-baked at the zoom's resolution, capped by `maxBackingPixels`), O(1) undo (opt-in `undoCheckpointDepth` pixel-checkpoint ring, rebake fallback), Intel-safe Metal read-back (render `.private` → blit → shared buffer), incremental encoder keyed by `Layer.id` (insert/reorder-safe), Metal smoothing + radius-scaled caps, Display P3 export.
+Recently closed: **O(N) offset-outline ribbon** (~15–20× faster rebake, hole-free), **white winding-holes on fast/dense strokes** (quad/outline wound to match caps), crisp zoom (re-bake at the zoom's resolution, capped by `maxBackingPixels`), O(1) undo (opt-in `undoCheckpointDepth` ring, rebake fallback), Intel-safe Metal read-back (`.private` → blit → shared buffer), incremental encoder keyed by `Layer.id`, Metal per-layer render (group opacity + layer-local erase) + smoothing, **SVG export of all layers** (was active-layer only), **layer-preserving replay**, Display P3 export.
 
 Still open, all device-bound: live `CAMetalLayer` view path (offscreen `MetalSessionRenderer` is the foundation), IOSurface presentation, canvas tiling. The Metal path now does Catmull-Rom smoothing, layer group opacity, and layer-local erase (via per-layer textures + a composite pass); the one remaining gap is per-stroke single-coverage translucency — a translucent stroke's self-overlaps can still double-blend on the GPU (the CG renderer handles this via a single fill).

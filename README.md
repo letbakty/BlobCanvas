@@ -45,8 +45,8 @@ DrawingBlobCodec (flat binary + LZFSE)
 - **Smoothing.** Committed strokes are Catmull-Rom interpolated (`smoothing`), while the live preview stays polyline for latency.
 - **Palm rejection.** `pencilOnly = true` draws only from Apple Pencil, ignoring finger/palm touches.
 - **Zoom & pan.** Pinch + two-finger pan (iOS), trackpad magnify + scroll (macOS), or programmatic `zoom(by:at:)` / `pan(by:)` / `resetZoom()`.
-- **Export.** `DrawingExporter.pngData / pdfData / svgString / thumbnailPNG`.
-- **Replay.** `DrawingPlayer(session).snapshot(at:)` reconstructs the drawing at any point in its creation from the captured timestamps.
+- **Export.** `DrawingExporter.pngData / pdfData / svgString / thumbnailPNG` — all composite every visible layer (with layer opacity).
+- **Replay.** `DrawingPlayer(session).snapshot(at:)` reconstructs the drawing at any point in its creation from the captured timestamps, preserving the layer stack (opacity/visibility) so the animation composites like the finished drawing.
 
 ## Persistence performance
 
@@ -55,14 +55,15 @@ DrawingBlobCodec (flat binary + LZFSE)
 
 ## Not yet (needs on-device verification)
 
-The offscreen Metal renderer above is done and GPU-tested. What remains is inherently device-bound:
+The offscreen Metal renderer above is done and GPU-tested (smoothing, per-layer group opacity, layer-local erase). What remains is inherently device-bound:
 
 - **Live `CAMetalLayer` view path** — driving `CanvasEngineView` on the GPU at 120 Hz (vs the current Core Graphics buffers) needs real-device frame validation; the offscreen `MetalSessionRenderer` is the foundation.
 - **IOSurface presentation & canvas tiling** — for very large canvases; the current owned-buffer + provider path already avoids per-frame copies at normal sizes.
+- **Per-stroke single-coverage translucency in Metal** — a translucent stroke's self-overlaps can double-blend on the GPU (the Core Graphics renderer handles this via a single fill).
 
 ## Testing
 
-`swift test` runs 71 tests: codec round-trip/fuzz (3000 hostile-input decodes) and safety hardening (NaN/Inf, amplified counts, overflow), incremental-encoder correctness, headless golden-pixel checks for both the Core Graphics and Metal renderers, layer compositing, undo-checkpoint restore, viewport/zoom math, export, and replay. Requires the Xcode 16 toolchain (Swift 6):
+`swift test` runs 76 tests: codec round-trip/fuzz (3000 hostile-input decodes) and safety hardening (NaN/Inf, amplified counts, overflow), incremental-encoder correctness, headless golden-pixel checks for both renderers (including Metal layer opacity & layer-local erase), stroke coverage vs a `CGContext.strokePath` reference (no winding holes), layer compositing, undo-checkpoint restore, viewport/zoom math, all-layer export, and layer-preserving replay. Requires the Xcode 16 toolchain (Swift 6):
 
 ```sh
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test

@@ -129,7 +129,7 @@ public final class MetalSessionRenderer: SessionImageRenderer, @unchecked Sendab
         // Clear the accumulator to the background.
         clearPass(accumulator, background: background, on: commandBuffer)
 
-        for (index, layer) in session.layers.enumerated() where layer.isVisible {
+        for layer in session.layers where layer.isVisible {
             // Tessellate this layer's strokes.
             var vertices: [Vertex] = []
             var ranges: [(start: Int, count: Int, erase: Bool)] = []
@@ -171,7 +171,6 @@ public final class MetalSessionRenderer: SessionImageRenderer, @unchecked Sendab
             ce.setFragmentBytes(&opacity, length: MemoryLayout<Float>.stride, index: 0)
             ce.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6)
             ce.endEncoding()
-            _ = index
         }
 
         // Blit the accumulator into the shared read-back buffer.
