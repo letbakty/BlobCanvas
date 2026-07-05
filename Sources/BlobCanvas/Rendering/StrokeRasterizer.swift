@@ -65,11 +65,31 @@ public enum StrokeRasterizer {
         let len = (dx * dx + dy * dy).squareRoot()
         guard len > 1e-4 else { return }
         let nx = -dy / len, ny = dx / len
-        path.move(to: CGPoint(x: a.x + nx * ra, y: a.y + ny * ra))
-        path.addLine(to: CGPoint(x: b.x + nx * rb, y: b.y + ny * rb))
-        path.addLine(to: CGPoint(x: b.x - nx * rb, y: b.y - ny * rb))
-        path.addLine(to: CGPoint(x: a.x - nx * ra, y: a.y - ny * ra))
+        var corners = [
+            CGPoint(x: a.x + nx * ra, y: a.y + ny * ra),
+            CGPoint(x: b.x + nx * rb, y: b.y + ny * rb),
+            CGPoint(x: b.x - nx * rb, y: b.y - ny * rb),
+            CGPoint(x: a.x - nx * ra, y: a.y - ny * ra),
+        ]
+        // Wind the quad the same way as `addEllipse` (the round caps/joins).
+        // Otherwise every cap∩quad overlap cancels under the single non-zero-
+        // winding fill, punching white lens/half-moon holes along the stroke.
+        if signedArea(corners) < 0 { corners.reverse() }
+        path.move(to: corners[0])
+        path.addLine(to: corners[1])
+        path.addLine(to: corners[2])
+        path.addLine(to: corners[3])
         path.closeSubpath()
+    }
+
+    /// Shoelace signed area; sign encodes winding direction.
+    private static func signedArea(_ pts: [CGPoint]) -> CGFloat {
+        var sum: CGFloat = 0
+        for i in pts.indices {
+            let j = (i + 1) % pts.count
+            sum += pts[i].x * pts[j].y - pts[j].x * pts[i].y
+        }
+        return sum
     }
 
     /// Adds one incremental joint (dot at `to` + quad from `from`) to `path`.

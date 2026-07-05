@@ -35,6 +35,59 @@ final class RasterizerTests: XCTestCase {
         XCTAssertLessThan(corner.a, 20) // transparent away from the stroke
     }
 
+    private func blackPixels(_ image: CGImage) -> Int {
+        let w = image.width, h = image.height
+        var buf = [UInt8](repeating: 0, count: w * h * 4)
+        let ctx = CGContext(data: &buf, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+                            space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+        var count = 0
+        for i in stride(from: 0, to: buf.count, by: 4) where buf[i] < 80 && buf[i + 1] < 80 && buf[i + 2] < 80 {
+            count += 1
+        }
+        return count
+    }
+
+    /// A self-intersecting stroke must cover the same area as a reference drawn
+    /// with `CGContext.strokePath` (round caps/joins — no winding issues). Fewer
+    /// black pixels than the reference means the ribbon has white lens/half-moon
+    /// holes from winding cancellation (the "white semicircles on fast strokes").
+    func testStrokeCoverageMatchesReferenceNoHoles() {
+        // A dense, self-overlapping zig-zag — the case that visibly holed out.
+        let pts: [(Float, Float)] = [
+            (60, 120), (540, 90), (80, 150), (520, 200), (100, 120),
+            (500, 260), (300, 300), (120, 340), (480, 330), (300, 200),
+        ]
+        let brush: Float = 34
+        let W = 600, H = 400
+        var session = DrawingSession(canvasSize: SIMD2(Float(W), Float(H)))
+        var stroke = Stroke(points: pts.map { StrokePoint(x: $0.0, y: $0.1) },
+                            color: StrokeColor(r: 0, g: 0, b: 0), brushSize: brush)
+        stroke.dynamics = .constant
+        session.commit(stroke)
+        let rendered = StrokeRasterizer.makeImage(session, scale: 1, background: StrokeColor.white)!
+
+        // Reference: same polyline stroked by Core Graphics (hole-free).
+        let ref = CGContext(data: nil, width: W, height: H, bitsPerComponent: 8, bytesPerRow: 0,
+                            space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                            bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue)!
+        ref.setFillColor(CGColor(gray: 1, alpha: 1)); ref.fill(CGRect(x: 0, y: 0, width: W, height: H))
+        ref.setStrokeColor(CGColor(gray: 0, alpha: 1))
+        ref.setLineWidth(CGFloat(brush)); ref.setLineCap(.round); ref.setLineJoin(.round)
+        ref.move(to: CGPoint(x: CGFloat(pts[0].0), y: CGFloat(pts[0].1)))
+        for p in pts.dropFirst() { ref.addLine(to: CGPoint(x: CGFloat(p.0), y: CGFloat(p.1))) }
+        ref.strokePath()
+        let reference = ref.makeImage()!
+
+        let renderedBlack = blackPixels(rendered)
+        let referenceBlack = blackPixels(reference)
+        // With holes the ribbon covers ~60% of the reference; a correct fill is
+        // within antialiasing tolerance.
+        XCTAssertGreaterThan(renderedBlack, Int(Double(referenceBlack) * 0.95),
+                             "ribbon covers \(renderedBlack) px vs reference \(referenceBlack) — likely winding holes")
+    }
+
     func testEraserClearsPixels() {
         var session = DrawingSession(canvasSize: SIMD2(100, 100))
         session.commit(horizontalLine(color: StrokeColor(r: 255, g: 0, b: 0), brushSize: 24))
