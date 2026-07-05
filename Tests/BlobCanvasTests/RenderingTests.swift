@@ -340,4 +340,32 @@ final class DrawingPlayerTests: XCTestCase {
         }
         XCTAssertEqual(player.snapshot(at: player.duration + 1).pointCount, session.pointCount)
     }
+
+    /// Replay must preserve the layer stack (count, opacity, visibility), so the
+    /// animation composites like the finished drawing.
+    func testReplayPreservesLayers() {
+        var session = DrawingSession(canvasSize: SIMD2(100, 100))
+        var s0 = Stroke(brushSize: 5)
+        for p in 0..<10 { s0.append(StrokePoint(x: Float(p), y: 20, timestamp: Float(p) / 60)) }
+        session.commit(s0)
+        session.addLayer(name: "Top")
+        session.setOpacity(0.4, ofLayer: 1)
+        var s1 = Stroke(brushSize: 5)
+        for p in 0..<10 { s1.append(StrokePoint(x: Float(p), y: 60, timestamp: Float(p) / 60)) }
+        session.commit(s1)
+
+        let player = DrawingPlayer(session)
+        let full = player.snapshot(at: player.duration + 1)
+        XCTAssertEqual(full.layers.count, 2)
+        XCTAssertEqual(full.layers[1].name, "Top")
+        XCTAssertEqual(full.layers[1].opacity, 0.4, accuracy: 1e-6)
+        XCTAssertEqual(full.layers[0].strokes.count, 1)
+        XCTAssertEqual(full.layers[1].strokes.count, 1)
+
+        // Early on, only the bottom layer has anything; the top is still empty.
+        let early = player.snapshot(at: 0.05)
+        XCTAssertEqual(early.layers.count, 2)
+        XCTAssertTrue(early.layers[1].strokes.isEmpty)
+        XCTAssertFalse(early.layers[0].strokes.isEmpty)
+    }
 }
