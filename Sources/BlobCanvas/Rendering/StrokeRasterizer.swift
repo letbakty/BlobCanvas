@@ -121,12 +121,64 @@ public enum StrokeRasterizer {
             addDot(path, at: first, radius: radii[0])
             return path
         }
-        addDot(path, at: first, radius: radii[0])
-        for i in 1..<centers.count {
+
+        // A single offset outline (left side forward, right side back) plus a
+        // round cap disc at each end. This is O(N) line segments instead of an
+        // `addEllipse` (four Béziers) at every sample — ~100× cheaper to fill on
+        // large drawings — and, being one simple contour, it can't self-cancel
+        // into holes. Beveled interior joins are sub-pixel on smoothed strokes.
+        let n = centers.count
+        var outline = [CGPoint]()
+        outline.reserveCapacity(n * 2)
+        for i in 0..<n {
+            let nrm = vertexNormal(centers, i)
+            outline.append(CGPoint(x: centers[i].x + nrm.dx * radii[i], y: centers[i].y + nrm.dy * radii[i]))
+        }
+        for i in stride(from: n - 1, through: 0, by: -1) {
+            let nrm = vertexNormal(centers, i)
+            outline.append(CGPoint(x: centers[i].x - nrm.dx * radii[i], y: centers[i].y - nrm.dy * radii[i]))
+        }
+        // Wind consistently with `addEllipse` so the caps union cleanly.
+        if signedArea(outline) < 0 { outline.reverse() }
+        path.move(to: outline[0])
+        for i in 1..<outline.count { path.addLine(to: outline[i]) }
+        path.closeSubpath()
+
+        // Round caps at the ends, plus round joins only at sharp turns (where the
+        // beveled outline would otherwise spike). Smooth strokes have none, so
+        // the fast O(N) path is preserved.
+        addDot(path, at: centers[0], radius: radii[0])
+        addDot(path, at: centers[n - 1], radius: radii[n - 1])
+        for i in 1..<(n - 1) where isSharpTurn(centers, i) {
             addDot(path, at: centers[i], radius: radii[i])
-            addQuad(path, from: centers[i - 1], to: centers[i], ra: radii[i - 1], rb: radii[i])
         }
         return path
+    }
+
+    /// True when the direction changes by more than ~60° at vertex `i`.
+    private static func isSharpTurn(_ centers: [CGPoint], _ i: Int) -> Bool {
+        let ax = centers[i].x - centers[i - 1].x, ay = centers[i].y - centers[i - 1].y
+        let bx = centers[i + 1].x - centers[i].x, by = centers[i + 1].y - centers[i].y
+        let la = (ax * ax + ay * ay).squareRoot(), lb = (bx * bx + by * by).squareRoot()
+        guard la > 1e-6, lb > 1e-6 else { return false }
+        return (ax * bx + ay * by) / (la * lb) < 0.5   // cos(60°)
+    }
+
+    /// Unit "miter" normal at vertex `i` — the average of the adjacent segment
+    /// left-normals. Used to offset the ribbon outline.
+    private static func vertexNormal(_ centers: [CGPoint], _ i: Int) -> CGVector {
+        func segNormal(_ a: CGPoint, _ b: CGPoint) -> CGVector {
+            let dx = b.x - a.x, dy = b.y - a.y
+            let len = (dx * dx + dy * dy).squareRoot()
+            guard len > 1e-6 else { return CGVector(dx: 0, dy: 0) }
+            return CGVector(dx: -dy / len, dy: dx / len)
+        }
+        var sum = CGVector(dx: 0, dy: 0)
+        if i > 0 { let s = segNormal(centers[i - 1], centers[i]); sum.dx += s.dx; sum.dy += s.dy }
+        if i < centers.count - 1 { let s = segNormal(centers[i], centers[i + 1]); sum.dx += s.dx; sum.dy += s.dy }
+        let len = (sum.dx * sum.dx + sum.dy * sum.dy).squareRoot()
+        guard len > 1e-6 else { return CGVector(dx: 0, dy: 1) }
+        return CGVector(dx: sum.dx / len, dy: sum.dy / len)
     }
 
     private static func strideRadii(for stroke: Stroke) -> [CGFloat] {
