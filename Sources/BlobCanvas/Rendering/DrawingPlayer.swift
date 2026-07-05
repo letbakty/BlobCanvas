@@ -71,12 +71,6 @@ public struct DrawingPlayer: Sendable {
                               activeLayerIndex: session.activeLayerIndex)
     }
 
-    /// Fraction 0…1 of the replay complete at `time`.
-    public func progress(at time: Double) -> Double {
-        guard duration > 0 else { return 1 }
-        return min(max(time / duration, 0), 1)
-    }
-
     // MARK: - Private
 
     private func partialStrokes(layerIndex li: Int, layer: Layer, time: Double) -> [Stroke] {

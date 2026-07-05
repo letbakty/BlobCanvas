@@ -521,7 +521,8 @@ public final class CanvasEngineView: PlatformView {
         onSessionChanged?(session)
     }
 
-    // MARK: - Test hooks (internal)
+    #if DEBUG
+    // MARK: - Test hooks (debug-only)
 
     /// Commits a stroke through the real commit path (checkpoints included),
     /// bypassing platform input events. For headless rendering tests.
@@ -534,6 +535,7 @@ public final class CanvasEngineView: PlatformView {
 
     /// The current committed pixels, for headless verification.
     func _committedImageForTesting() -> CGImage? { committed?.snapshot() }
+    #endif
 
     /// Discards the in-progress stroke without committing (e.g. when a zoom/pan
     /// gesture takes over). Re-bakes so any incremental eraser pixels are undone.
