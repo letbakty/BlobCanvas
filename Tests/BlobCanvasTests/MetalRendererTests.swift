@@ -96,6 +96,35 @@ final class MetalRendererTests: XCTestCase {
         XCTAssertGreaterThan(pixel(image, 60, 60).a, 100) // stroke passes near the middle
     }
 
+    /// A layer at 0.5 opacity must render at roughly half alpha (per-layer
+    /// composite), matching the Core Graphics renderer.
+    func testMetalLayerOpacity() throws {
+        let renderer = try makeRenderer()
+        var session = DrawingSession(canvasSize: SIMD2(60, 60))
+        session.setOpacity(0.5, ofLayer: 0)
+        session.commit(Stroke(points: [StrokePoint(x: 5 as Float, y: 30), StrokePoint(x: 55 as Float, y: 30)],
+                              color: StrokeColor(r: 0, g: 0, b: 0), brushSize: 30))
+        let image = try XCTUnwrap(renderer.makeImage(session, scale: 1, background: nil))
+        let a = pixel(image, 30, 30).a
+        XCTAssertGreaterThan(a, 100)
+        XCTAssertLessThan(a, 160)
+    }
+
+    /// An eraser on the top layer must not clear the layer beneath it (per-layer
+    /// isolation).
+    func testMetalEraserIsLayerLocal() throws {
+        let renderer = try makeRenderer()
+        var session = DrawingSession(canvasSize: SIMD2(60, 60))
+        session.commit(Stroke(points: [StrokePoint(x: 5 as Float, y: 30), StrokePoint(x: 55 as Float, y: 30)],
+                              color: StrokeColor(r: 0, g: 180, b: 0), brushSize: 26))   // bottom: green
+        session.addLayer(name: "Top")
+        session.commit(Stroke(points: [StrokePoint(x: 5 as Float, y: 30), StrokePoint(x: 55 as Float, y: 30)],
+                              color: .black, brushSize: 26, blendMode: .erase))          // erase in top layer
+        let image = try XCTUnwrap(renderer.makeImage(session, scale: 1, background: nil))
+        // Bottom green must survive the top-layer eraser.
+        XCTAssertGreaterThan(pixel(image, 30, 30).g, 120)
+    }
+
     func testMetalScaleProducesLargerImage() throws {
         let renderer = try makeRenderer()
         let session = DrawingSession(canvasSize: SIMD2(40, 30))

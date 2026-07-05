@@ -29,6 +29,9 @@ public final class MetalSessionRenderer: SessionImageRenderer, @unchecked Sendab
     private let queue: MTLCommandQueue
     private let normalPipeline: MTLRenderPipelineState
     private let erasePipeline: MTLRenderPipelineState
+    /// Composites a rendered layer texture over the accumulator, scaled by the
+    /// layer's opacity (fullscreen quad, premultiplied over).
+    private let compositePipeline: MTLRenderPipelineState
 
     /// Shared instance — reuse it, since `init` compiles the shader library
     /// (tens of ms). `nil` when no Metal device is available.
@@ -80,6 +83,20 @@ public final class MetalSessionRenderer: SessionImageRenderer, @unchecked Sendab
             }
             self.normalPipeline = try makePipeline(erase: false)
             self.erasePipeline = try makePipeline(erase: true)
+
+            guard let cvfn = library.makeFunction(name: "composite_vertex"),
+                  let cffn = library.makeFunction(name: "composite_fragment") else { return nil }
+            let cdesc = MTLRenderPipelineDescriptor()
+            cdesc.vertexFunction = cvfn
+            cdesc.fragmentFunction = cffn
+            let catt = cdesc.colorAttachments[0]!
+            catt.pixelFormat = .rgba8Unorm
+            catt.isBlendingEnabled = true
+            catt.sourceRGBBlendFactor = .one            // source is premultiplied
+            catt.destinationRGBBlendFactor = .oneMinusSourceAlpha
+            catt.sourceAlphaBlendFactor = .one
+            catt.destinationAlphaBlendFactor = .oneMinusSourceAlpha
+            self.compositePipeline = try device.makeRenderPipelineState(descriptor: cdesc)
         } catch {
             return nil
         }
@@ -89,66 +106,77 @@ public final class MetalSessionRenderer: SessionImageRenderer, @unchecked Sendab
         let width = StrokeRasterizer.pixelDimension(CGFloat(session.canvasSize.x), scale: scale)
         let height = StrokeRasterizer.pixelDimension(CGFloat(session.canvasSize.y), scale: scale)
 
-        // Render target lives in .private memory so this works on Intel Macs
+        // Render targets live in .private memory so this works on Intel Macs
         // with a discrete GPU (where .shared render targets are disallowed).
-        // Pixels are blitted to a shared buffer for read-back below.
-        let texDesc = MTLTextureDescriptor.texture2DDescriptor(
-            pixelFormat: .rgba8Unorm, width: width, height: height, mipmapped: false)
-        texDesc.usage = [.renderTarget]
-        texDesc.storageMode = .private
-        guard let texture = device.makeTexture(descriptor: texDesc) else { return nil }
+        func makeTarget(read: Bool) -> MTLTexture? {
+            let d = MTLTextureDescriptor.texture2DDescriptor(
+                pixelFormat: .rgba8Unorm, width: width, height: height, mipmapped: false)
+            d.usage = read ? [.renderTarget, .shaderRead] : [.renderTarget]
+            d.storageMode = .private
+            return device.makeTexture(descriptor: d)
+        }
+        // `accumulator` holds the composited result; each visible layer is drawn
+        // into `layerTex` then composited over the accumulator scaled by the
+        // layer's opacity — giving group opacity and layer-local erase.
+        guard let accumulator = makeTarget(read: false), let layerTex = makeTarget(read: true) else { return nil }
 
         let bytesPerRow = width * 4
-        guard let readback = device.makeBuffer(length: bytesPerRow * height, options: .storageModeShared)
-        else { return nil }
-
-        let pass = MTLRenderPassDescriptor()
-        pass.colorAttachments[0].texture = texture
-        pass.colorAttachments[0].loadAction = .clear
-        pass.colorAttachments[0].storeAction = .store
-        if let bg = background {
-            pass.colorAttachments[0].clearColor = MTLClearColor(
-                red: Double(bg.r) / 255, green: Double(bg.g) / 255,
-                blue: Double(bg.b) / 255, alpha: Double(bg.a) / 255)
-        } else {
-            pass.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
-        }
-
-        guard let commandBuffer = queue.makeCommandBuffer(),
-              let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: pass) else { return nil }
+        guard let readback = device.makeBuffer(length: bytesPerRow * height, options: .storageModeShared),
+              let commandBuffer = queue.makeCommandBuffer() else { return nil }
 
         var uniforms = Uniforms(canvasSize: SIMD2(Float(session.canvasSize.x), Float(session.canvasSize.y)))
-        encoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
 
-        // Tessellate all strokes into one vertex buffer, preserving paint order,
-        // and record per-stroke draw ranges (setVertexBytes caps at 4 KB, so a
-        // real vertex buffer is required for anything but the shortest strokes).
-        var vertices: [Vertex] = []
-        var ranges: [(start: Int, count: Int, erase: Bool)] = []
-        for layer in session.layers where layer.isVisible {
+        // Clear the accumulator to the background.
+        clearPass(accumulator, background: background, on: commandBuffer)
+
+        for (index, layer) in session.layers.enumerated() where layer.isVisible {
+            // Tessellate this layer's strokes.
+            var vertices: [Vertex] = []
+            var ranges: [(start: Int, count: Int, erase: Bool)] = []
             for stroke in layer.strokes {
                 let start = vertices.count
                 appendTessellation(of: stroke, into: &vertices)
                 let count = vertices.count - start
                 if count > 0 { ranges.append((start, count, stroke.blendMode == .erase)) }
             }
-        }
+            guard !vertices.isEmpty,
+                  let buffer = device.makeBuffer(bytes: vertices,
+                                                 length: vertices.count * MemoryLayout<Vertex>.stride,
+                                                 options: .storageModeShared) else { continue }
 
-        if !vertices.isEmpty,
-           let buffer = device.makeBuffer(bytes: vertices,
-                                          length: vertices.count * MemoryLayout<Vertex>.stride,
-                                          options: .storageModeShared) {
-            encoder.setVertexBuffer(buffer, offset: 0, index: 0)
+            // Render the layer into a cleared texture.
+            let lp = MTLRenderPassDescriptor()
+            lp.colorAttachments[0].texture = layerTex
+            lp.colorAttachments[0].loadAction = .clear
+            lp.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
+            lp.colorAttachments[0].storeAction = .store
+            guard let le = commandBuffer.makeRenderCommandEncoder(descriptor: lp) else { return nil }
+            le.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
+            le.setVertexBuffer(buffer, offset: 0, index: 0)
             for range in ranges {
-                encoder.setRenderPipelineState(range.erase ? erasePipeline : normalPipeline)
-                encoder.drawPrimitives(type: .triangle, vertexStart: range.start, vertexCount: range.count)
+                le.setRenderPipelineState(range.erase ? erasePipeline : normalPipeline)
+                le.drawPrimitives(type: .triangle, vertexStart: range.start, vertexCount: range.count)
             }
-        }
-        encoder.endEncoding()
+            le.endEncoding()
 
-        // Blit the private render target into the shared read-back buffer.
+            // Composite the layer over the accumulator with its opacity.
+            let cp = MTLRenderPassDescriptor()
+            cp.colorAttachments[0].texture = accumulator
+            cp.colorAttachments[0].loadAction = .load
+            cp.colorAttachments[0].storeAction = .store
+            guard let ce = commandBuffer.makeRenderCommandEncoder(descriptor: cp) else { return nil }
+            ce.setRenderPipelineState(compositePipeline)
+            ce.setFragmentTexture(layerTex, index: 0)
+            var opacity = max(min(layer.opacity, 1), 0)
+            ce.setFragmentBytes(&opacity, length: MemoryLayout<Float>.stride, index: 0)
+            ce.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6)
+            ce.endEncoding()
+            _ = index
+        }
+
+        // Blit the accumulator into the shared read-back buffer.
         guard let blit = commandBuffer.makeBlitCommandEncoder() else { return nil }
-        blit.copy(from: texture, sourceSlice: 0, sourceLevel: 0,
+        blit.copy(from: accumulator, sourceSlice: 0, sourceLevel: 0,
                   sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
                   sourceSize: MTLSize(width: width, height: height, depth: 1),
                   to: readback, destinationOffset: 0,
@@ -159,6 +187,22 @@ public final class MetalSessionRenderer: SessionImageRenderer, @unchecked Sendab
         commandBuffer.waitUntilCompleted()
 
         return makeCGImage(from: readback, width: width, height: height, bytesPerRow: bytesPerRow)
+    }
+
+    /// A render pass that just clears `texture` to `background` (or transparent).
+    private func clearPass(_ texture: MTLTexture, background: StrokeColor?, on commandBuffer: MTLCommandBuffer) {
+        let p = MTLRenderPassDescriptor()
+        p.colorAttachments[0].texture = texture
+        p.colorAttachments[0].loadAction = .clear
+        p.colorAttachments[0].storeAction = .store
+        if let bg = background {
+            p.colorAttachments[0].clearColor = MTLClearColor(
+                red: Double(bg.r) / 255, green: Double(bg.g) / 255,
+                blue: Double(bg.b) / 255, alpha: Double(bg.a) / 255)
+        } else {
+            p.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
+        }
+        commandBuffer.makeRenderCommandEncoder(descriptor: p)?.endEncoding()
     }
 
     // MARK: - Tessellation
@@ -264,6 +308,25 @@ public final class MetalSessionRenderer: SessionImageRenderer, @unchecked Sendab
 
     fragment float4 blob_fragment(VertexOut in [[stage_in]]) {
         return in.color;
+    }
+
+    // Fullscreen-triangle composite: sample the layer texture at this pixel and
+    // scale by the layer opacity (premultiplied → multiply all channels).
+    struct QuadOut { float4 position [[position]]; };
+
+    vertex QuadOut composite_vertex(uint vid [[vertex_id]]) {
+        float2 corners[6] = { float2(-1,-1), float2(1,-1), float2(1,1),
+                              float2(-1,-1), float2(1,1), float2(-1,1) };
+        QuadOut out;
+        out.position = float4(corners[vid], 0.0, 1.0);
+        return out;
+    }
+
+    fragment float4 composite_fragment(QuadOut in [[stage_in]],
+                                       texture2d<float, access::read> layerTex [[texture(0)]],
+                                       constant float& opacity [[buffer(0)]]) {
+        uint2 coord = uint2(in.position.xy);
+        return layerTex.read(coord) * opacity;
     }
     """
 }
