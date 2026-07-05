@@ -63,6 +63,27 @@ public enum DrawingBlobCodec {
     /// real drawing, but bounded.
     static let pointSanityLimit: UInt64 = 64 * 1024 * 1024
 
+    /// Largest canvas dimension we'll trust from a decoded blob (also the common
+    /// GPU max texture size). Guards `Int(Float)` conversions downstream from
+    /// trapping on NaN/Inf or exploding on absurd sizes.
+    static let maxCanvasDimension: Float = 16384
+
+    /// Cap on eager `reserveCapacity` from an untrusted count, so a tiny blob
+    /// claiming a huge count can't pre-allocate gigabytes. Real arrays still grow
+    /// as data is actually read.
+    static let reserveCap = 4096
+
+    /// Clamps an untrusted float to a finite range, replacing NaN/Inf with `def`.
+    static func sanitize(_ v: Float, default def: Float, min lo: Float, max hi: Float) -> Float {
+        v.isFinite ? Swift.min(Swift.max(v, lo), hi) : def
+    }
+
+    /// A finite, bounded canvas size — safe for downstream `Int(Float)` math.
+    static func sanitizedCanvas(_ w: Float, _ h: Float) -> SIMD2<Float> {
+        SIMD2(sanitize(w, default: 1, min: 1, max: maxCanvasDimension),
+              sanitize(h, default: 1, min: 1, max: maxCanvasDimension))
+    }
+
     // MARK: - Encode (v4: layers)
 
     /// Serializes and LZFSE-compresses a session. Call on auto-save/export
@@ -93,13 +114,13 @@ public enum DrawingBlobCodec {
         payload.appendVarint(UInt64(stroke.points.count))
         var px: Int64 = 0, py: Int64 = 0, pt: Int64 = 0
         for point in stroke.points {
-            let fx = Int64((point.x * coordScale).rounded())
-            let fy = Int64((point.y * coordScale).rounded())
-            let ft = Int64((point.timestamp * timeScale).rounded())
-            payload.appendZigzag(fx - px)
-            payload.appendZigzag(fy - py)
+            let fx = fixed(point.x, coordScale)
+            let fy = fixed(point.y, coordScale)
+            let ft = fixed(point.timestamp, timeScale)
+            payload.appendZigzag(fx &- px)
+            payload.appendZigzag(fy &- py)
             payload.append(quantizePressure(point.pressure))
-            payload.appendZigzag(ft - pt)
+            payload.appendZigzag(ft &- pt)
             px = fx; py = fy; pt = ft
         }
     }
@@ -132,7 +153,7 @@ public enum DrawingBlobCodec {
         guard layerCount <= pointSanityLimit else { throw CodecError.implausibleCount }
 
         var layers: [Layer] = []
-        layers.reserveCapacity(Int(layerCount))
+        layers.reserveCapacity(min(Int(layerCount), reserveCap))
         for _ in 0..<layerCount {
             let name = try readString(&body)
             let opacity: Float = try body.readLE()
@@ -143,12 +164,14 @@ public enum DrawingBlobCodec {
             var strokes: [Stroke] = []
             for _ in 0..<frameCount {
                 let len = try body.readVarint()
+                guard len <= UInt64(Int.max) else { throw CodecError.truncated }
                 let frame = try body.readBytes(Int(len))
                 strokes.append(contentsOf: try decodeFrame(frame))
             }
-            layers.append(Layer(name: name, strokes: strokes, opacity: opacity, isVisible: isVisible))
+            layers.append(Layer(name: name, strokes: strokes, opacity: sanitize(opacity, default: 1, min: 0, max: 1),
+                                isVisible: isVisible))
         }
-        return DrawingSession(canvasSize: SIMD2(w, h), layers: layers,
+        return DrawingSession(canvasSize: sanitizedCanvas(w, h), layers: layers,
                               activeLayerIndex: Int(min(activeIndex, UInt64(Int.max))))
     }
 
@@ -221,15 +244,17 @@ public enum DrawingBlobCodec {
         guard layerCount <= pointSanityLimit else { throw CodecError.implausibleCount }
 
         var layers: [Layer] = []
-        layers.reserveCapacity(Int(layerCount))
+        layers.reserveCapacity(min(Int(layerCount), reserveCap))
         for _ in 0..<layerCount {
             let name = try readString(&body)
             let opacity: Float = try body.readLE()
             let isVisible = try body.readByte() != 0
             let strokes = try readStrokes(&body, hasFlags: true)
-            layers.append(Layer(name: name, strokes: strokes, opacity: opacity, isVisible: isVisible))
+            layers.append(Layer(name: name, strokes: strokes, opacity: sanitize(opacity, default: 1, min: 0, max: 1),
+                                isVisible: isVisible))
         }
-        return DrawingSession(canvasSize: SIMD2(w, h), layers: layers, activeLayerIndex: Int(min(activeIndex, UInt64(Int.max))))
+        return DrawingSession(canvasSize: sanitizedCanvas(w, h), layers: layers,
+                              activeLayerIndex: Int(min(activeIndex, UInt64(Int.max))))
     }
 
     /// v2/v3: canvas + a single flat stroke block → one default layer.
@@ -238,7 +263,7 @@ public enum DrawingBlobCodec {
         let w: Float = try body.readLE()
         let h: Float = try body.readLE()
         let strokes = try readStrokes(&body, hasFlags: hasFlags)
-        return DrawingSession(canvasSize: SIMD2(w, h), strokes: strokes)
+        return DrawingSession(canvasSize: sanitizedCanvas(w, h), strokes: strokes)
     }
 
     /// Reads a varint-prefixed run of delta-encoded strokes.
@@ -246,7 +271,7 @@ public enum DrawingBlobCodec {
         let strokeCount = try body.readVarint()
         guard strokeCount <= pointSanityLimit else { throw CodecError.implausibleCount }
         var strokes: [Stroke] = []
-        strokes.reserveCapacity(Int(strokeCount))
+        strokes.reserveCapacity(min(Int(strokeCount), reserveCap))
         for _ in 0..<strokeCount {
             let color = StrokeColor(
                 r: try body.readByte(), g: try body.readByte(),
@@ -254,18 +279,21 @@ public enum DrawingBlobCodec {
             )
             let (blendMode, dynamics): (BlendMode, WidthDynamics) =
                 hasFlags ? decodeFlags(try body.readByte()) : (.normal, .pressure)
-            let brushSize: Float = try body.readLE()
+            let brushSize = sanitize(try body.readLE(), default: 1, min: 0, max: maxCanvasDimension)
             let pointCount = try body.readVarint()
             guard pointCount <= pointSanityLimit else { throw CodecError.implausibleCount }
 
             var points = [StrokePoint]()
-            points.reserveCapacity(Int(pointCount))
+            points.reserveCapacity(min(Int(pointCount), reserveCap))
             var px: Int64 = 0, py: Int64 = 0, pt: Int64 = 0
             for _ in 0..<pointCount {
-                px += try body.readZigzag()
-                py += try body.readZigzag()
+                // Wrapping add: hostile deltas can't overflow-trap; the result
+                // stays a finite Int64 (→ finite Float below).
+                px &+= try body.readZigzag()
+                py &+= try body.readZigzag()
                 let pressure = try body.readByte()
-                pt += try body.readZigzag()
+                pt &+= try body.readZigzag()
+                // Values are integer-derived, so always finite — no sanitize needed.
                 points.append(StrokePoint(
                     x: Float(px) / coordScale,
                     y: Float(py) / coordScale,
@@ -314,26 +342,36 @@ public enum DrawingBlobCodec {
         guard UInt64(strokeCount) <= pointSanityLimit else { throw CodecError.implausibleCount }
 
         var strokes: [Stroke] = []
-        strokes.reserveCapacity(Int(strokeCount))
+        strokes.reserveCapacity(min(Int(strokeCount), reserveCap))
 
         for _ in 0..<strokeCount {
             let color = StrokeColor(
                 r: try body.readByte(), g: try body.readByte(),
                 b: try body.readByte(), a: try body.readByte()
             )
-            let brushSize: Float = try body.readLE()
+            let brushSize = sanitize(try body.readLE(), default: 1, min: 0, max: maxCanvasDimension)
             let pointCount: UInt32 = try body.readLE()
             guard UInt64(pointCount) <= pointSanityLimit else { throw CodecError.implausibleCount }
 
+            // The bytes must actually be present, so this alloc is bounded by the
+            // real blob size (no small-blob amplification).
             let byteCount = Int(pointCount) * legacyPointStride
             let pointBytes = try body.readBytes(byteCount)
-            let points = [StrokePoint](unsafeUninitializedCapacity: Int(pointCount)) { buffer, initialized in
+            let raw = [StrokePoint](unsafeUninitializedCapacity: Int(pointCount)) { buffer, initialized in
                 _ = pointBytes.copyBytes(to: buffer)
                 initialized = Int(pointCount)
             }
+            // v1 points are raw Float32 — sanitize NaN/Inf so downstream Int()
+            // math can't trap.
+            let points = raw.map {
+                StrokePoint(x: sanitize($0.x, default: 0, min: -1e6, max: 1e6),
+                            y: sanitize($0.y, default: 0, min: -1e6, max: 1e6),
+                            pressure: sanitize($0.pressure, default: 1, min: 0, max: 1),
+                            timestamp: sanitize($0.timestamp, default: 0, min: 0, max: 1e9))
+            }
             strokes.append(Stroke(points: points, color: color, brushSize: brushSize))
         }
-        return DrawingSession(canvasSize: SIMD2(w, h), strokes: strokes)
+        return DrawingSession(canvasSize: sanitizedCanvas(w, h), strokes: strokes)
     }
 
     // MARK: - Container helpers
@@ -371,7 +409,17 @@ public enum DrawingBlobCodec {
     }
 
     private static func quantizePressure(_ p: Float) -> UInt8 {
-        UInt8((min(max(p, 0), 1) * 255).rounded())
+        guard p.isFinite else { return 255 }
+        return UInt8((min(max(p, 0), 1) * 255).rounded())
+    }
+
+    /// Fixed-point encode of a coordinate/time, clamped so `Int64()` can't trap
+    /// on NaN/Inf or huge finite values from a caller-built stroke.
+    private static func fixed(_ v: Float, _ scale: Float) -> Int64 {
+        let x = (v * scale).rounded()
+        guard x.isFinite else { return 0 }
+        let cap: Float = 1e15   // safely inside Int64 range
+        return Int64(Swift.min(Swift.max(x, -cap), cap))
     }
 
     /// Zero-copy sequential reader over a Data blob.
@@ -464,12 +512,12 @@ extension DrawingBlobCodec {
             payload.appendVarint(UInt64(stroke.points.count))
             var px: Int64 = 0, py: Int64 = 0, pt: Int64 = 0
             for point in stroke.points {
-                let fx = Int64((point.x * coordScale).rounded())
-                let fy = Int64((point.y * coordScale).rounded())
-                let ft = Int64((point.timestamp * timeScale).rounded())
-                payload.appendZigzag(fx - px); payload.appendZigzag(fy - py)
-                payload.append(UInt8((min(max(point.pressure, 0), 1) * 255).rounded()))
-                payload.appendZigzag(ft - pt)
+                let fx = fixed(point.x, coordScale)
+                let fy = fixed(point.y, coordScale)
+                let ft = fixed(point.timestamp, timeScale)
+                payload.appendZigzag(fx &- px); payload.appendZigzag(fy &- py)
+                payload.append(quantizePressure(point.pressure))
+                payload.appendZigzag(ft &- pt)
                 px = fx; py = fy; pt = ft
             }
         }

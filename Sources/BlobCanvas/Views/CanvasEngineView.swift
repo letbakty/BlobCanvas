@@ -29,8 +29,8 @@ private final class CanvasBuffer {
     private let bytesPerRow: Int
 
     init?(canvasSize: CGSize, scale: CGFloat) {
-        let w = max(1, Int((canvasSize.width * scale).rounded()))
-        let h = max(1, Int((canvasSize.height * scale).rounded()))
+        let w = StrokeRasterizer.pixelDimension(canvasSize.width, scale: scale)
+        let h = StrokeRasterizer.pixelDimension(canvasSize.height, scale: scale)
         let bpr = w * 4
         let byteCount = bpr * h
         guard let data = calloc(byteCount, 1) else { return nil }
@@ -715,7 +715,7 @@ extension CanvasEngineView {
     }
 
     public override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
-        guard activeTouch == nil || touches.contains(activeTouch!) else { return }
+        if let active = activeTouch, !touches.contains(active) { return }
         activeTouch = nil
         endStroke()
     }

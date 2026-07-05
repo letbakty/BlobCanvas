@@ -14,6 +14,15 @@ public enum StrokeRasterizer {
     /// Wide-gamut space for export into Display P3 (see `makeImage(…colorSpace:)`).
     public static let displayP3 = CGColorSpace(name: CGColorSpace.displayP3)!
 
+    /// A safe backing pixel dimension for `points × scale`: finite, ≥1, and
+    /// capped at the common GPU max texture size. Prevents `Int(Float)` traps on
+    /// NaN/Inf and absurd allocations regardless of where the size came from.
+    public static func pixelDimension(_ points: CGFloat, scale: CGFloat) -> Int {
+        let v = points * scale
+        guard v.isFinite, v >= 1 else { return 1 }
+        return min(Int(v.rounded()), 32768)
+    }
+
     // MARK: - Width
 
     /// Half-width at a point, given its neighbor for velocity. Stateless for
@@ -198,8 +207,8 @@ public enum StrokeRasterizer {
         _ session: DrawingSession, scale: CGFloat = 1, background: StrokeColor? = nil,
         colorSpace space: CGColorSpace = colorSpace
     ) -> CGImage? {
-        let w = max(1, Int((CGFloat(session.canvasSize.x) * scale).rounded()))
-        let h = max(1, Int((CGFloat(session.canvasSize.y) * scale).rounded()))
+        let w = pixelDimension(CGFloat(session.canvasSize.x), scale: scale)
+        let h = pixelDimension(CGFloat(session.canvasSize.y), scale: scale)
         guard let ctx = CGContext(
             data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
             space: space,

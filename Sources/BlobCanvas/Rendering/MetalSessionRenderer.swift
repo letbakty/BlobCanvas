@@ -86,8 +86,8 @@ public final class MetalSessionRenderer: SessionImageRenderer, @unchecked Sendab
     }
 
     public func makeImage(_ session: DrawingSession, scale: CGFloat, background: StrokeColor?) -> CGImage? {
-        let width = max(1, Int((CGFloat(session.canvasSize.x) * scale).rounded()))
-        let height = max(1, Int((CGFloat(session.canvasSize.y) * scale).rounded()))
+        let width = StrokeRasterizer.pixelDimension(CGFloat(session.canvasSize.x), scale: scale)
+        let height = StrokeRasterizer.pixelDimension(CGFloat(session.canvasSize.y), scale: scale)
 
         // Render target lives in .private memory so this works on Intel Macs
         // with a discrete GPU (where .shared render targets are disallowed).
@@ -181,6 +181,9 @@ public final class MetalSessionRenderer: SessionImageRenderer, @unchecked Sendab
     }
 
     private func appendDisc(_ verts: inout [Vertex], center: CGPoint, radius: CGFloat, color: SIMD4<Float>) {
+        // Guard against non-finite geometry (e.g. a caller-built NaN brush size)
+        // so the Int() below can't trap.
+        guard radius.isFinite, center.x.isFinite, center.y.isFinite else { return }
         // Segment count scales with radius so large brushes stay round.
         let segments = min(max(Int((radius * 1.5).rounded()), 8), 64)
         let cx = Float(center.x), cy = Float(center.y), rr = Float(radius)
