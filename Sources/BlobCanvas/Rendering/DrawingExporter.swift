@@ -75,11 +75,18 @@ public enum DrawingExporter {
         if let background {
             svg += #"<rect width="100%" height="100%" fill="\#(rgb(background))" fill-opacity="\#(alpha(background))"/>"# + "\n"
         }
-        for stroke in session.strokes {
-            let path = StrokeRasterizer.ribbonPath(for: stroke, smoothing: true)
-            let color = stroke.blendMode == .erase ? (background ?? .white) : stroke.color
-            svg += #"<path d="\#(svgPathData(path))" fill="\#(rgb(color))" "#
-            svg += #"fill-opacity="\#(alpha(color))" fill-rule="nonzero"/>"# + "\n"
+        // All visible layers, bottom-up, each in a group carrying its opacity —
+        // matching the PNG/PDF renderers (which composite every layer).
+        for layer in session.layers where layer.isVisible && !layer.strokes.isEmpty {
+            let grouped = layer.opacity < 0.999
+            if grouped { svg += #"<g opacity="\#(String(format: "%.3f", layer.opacity))">"# + "\n" }
+            for stroke in layer.strokes {
+                let path = StrokeRasterizer.ribbonPath(for: stroke, smoothing: true)
+                let color = stroke.blendMode == .erase ? (background ?? .white) : stroke.color
+                svg += #"<path d="\#(svgPathData(path))" fill="\#(rgb(color))" "#
+                svg += #"fill-opacity="\#(alpha(color))" fill-rule="nonzero"/>"# + "\n"
+            }
+            if grouped { svg += "</g>\n" }
         }
         svg += "</svg>\n"
         return svg

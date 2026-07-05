@@ -280,6 +280,25 @@ final class ExporterTests: XCTestCase {
         XCTAssertTrue(svg.contains("viewBox=\"0 0 120.00 90.00\""))
     }
 
+    /// SVG export must include every visible layer (not just the active one),
+    /// matching the PNG/PDF renderers.
+    func testSVGExportsAllLayers() {
+        var session = DrawingSession(canvasSize: SIMD2(100, 100))
+        session.commit(Stroke(points: [StrokePoint(x: 10 as Float, y: 50), StrokePoint(x: 90 as Float, y: 50)],
+                              color: StrokeColor(r: 200, g: 30, b: 30), brushSize: 6))
+        session.addLayer(name: "Top")
+        session.setOpacity(0.5, ofLayer: 1)
+        session.commit(Stroke(points: [StrokePoint(x: 10 as Float, y: 70), StrokePoint(x: 90 as Float, y: 70)],
+                              color: StrokeColor(r: 30, g: 30, b: 200), brushSize: 6))
+
+        let svg = DrawingExporter.svgString(session)
+        // Both strokes' colors present → both layers exported.
+        XCTAssertTrue(svg.contains("rgb(200,30,30)"), "active/bottom layer missing")
+        XCTAssertTrue(svg.contains("rgb(30,30,200)"), "second layer missing")
+        // Second layer's opacity is carried as a group.
+        XCTAssertTrue(svg.contains(#"<g opacity="0.500">"#), "layer opacity missing")
+    }
+
     func testThumbnailFitsMaxDimension() throws {
         let data = try XCTUnwrap(DrawingExporter.thumbnailPNG(sampleSession(), maxDimension: 60))
         let src = CGImageSourceCreateWithData(data as CFData, nil)!

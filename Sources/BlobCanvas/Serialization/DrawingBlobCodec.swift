@@ -487,10 +487,11 @@ extension DrawingBlobCodec {
     /// fixtures.
     static func encodeLegacyV1(_ session: DrawingSession, compress: Bool = true) -> Data {
         var payload = Data()
+        let strokes = session.allStrokes   // v1 is flat — flatten every layer
         payload.appendLE(session.canvasSize.x)
         payload.appendLE(session.canvasSize.y)
-        payload.appendLE(UInt32(session.strokes.count))
-        for stroke in session.strokes {
+        payload.appendLE(UInt32(strokes.count))
+        for stroke in strokes {
             payload.append(contentsOf: [stroke.color.r, stroke.color.g, stroke.color.b, stroke.color.a])
             payload.appendLE(stroke.brushSize)
             payload.appendLE(UInt32(stroke.points.count))
@@ -503,10 +504,11 @@ extension DrawingBlobCodec {
     /// for exercising the v2 → current migration path.
     static func encodeLegacyV2(_ session: DrawingSession, compress: Bool = true) -> Data {
         var payload = Data()
+        let strokes = session.allStrokes   // v2 is flat — flatten every layer
         payload.appendLE(session.canvasSize.x)
         payload.appendLE(session.canvasSize.y)
-        payload.appendVarint(UInt64(session.strokes.count))
-        for stroke in session.strokes {
+        payload.appendVarint(UInt64(strokes.count))
+        for stroke in strokes {
             payload.append(contentsOf: [stroke.color.r, stroke.color.g, stroke.color.b, stroke.color.a])
             payload.appendLE(stroke.brushSize)
             payload.appendVarint(UInt64(stroke.points.count))
