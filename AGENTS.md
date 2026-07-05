@@ -19,7 +19,7 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -scheme Blob
 
 - Plain `swift build` (command-line toolchain) **fails** — SwiftData macro plugin is missing.
 - `Package.swift` is `swift-tools-version: 6.0`, `swiftLanguageMode(.v6)` — keep it concurrency-clean (value types are `Sendable`; the view/controller are `@MainActor`).
-- 51 tests must stay green. Metal tests `XCTSkip` when no GPU is present (CI runners), so a skip is not a failure.
+- 71 tests must stay green. Metal tests `XCTSkip` when no GPU is present (CI runners), so a skip is not a failure.
 
 ## Module layout
 
@@ -60,6 +60,7 @@ Tests/BlobCanvasTests/  codec, fuzz, incremental, rasterizer/Metal golden, layer
 
 - **Coordinates:** strokes are stored in *canvas points* (device-independent). The view aspect-fits + zoom/pans via `CanvasViewport`. Never store view-space coords.
 - **Codec is lossy by design (v2+):** points quantized to 1/32 pt, pressure 8-bit, timestamp 1 ms. Round-trip tests must use **tolerance**, not `==` against a raw session; compare against a decoded one-shot for exact equality.
+- **`decode` is hostile-input-hardened — keep it that way.** It takes arbitrary `Data`. Don't remove: `sanitize`/`sanitizedCanvas`/`fixed` on untrusted floats (NaN/Inf → `Int()` trap), `min(count, reserveCap)` on every `reserveCapacity` (amplification OOM), the `len <= Int.max` guard before `readBytes`, or `&+=`/`&-` on the Int64 delta accumulators (overflow trap). Any Float→pixel-int must go through `StrokeRasterizer.pixelDimension`. Add a `CodecSafetyTests` case for new decode paths.
 - **`Data` slices keep parent indices** — never subscript a slice with `[0]`; use the codec `Reader`.
 - **Live vs committed:** the live preview is approximate (polyline, no smoothing, top-layer assumption); the authoritative render happens on commit / `rebake()` via `StrokeRasterizer`. Don't "fix" a preview mismatch by changing committed logic.
 - **Eraser** draws straight into `committed` for live feedback; `endStroke`/`rebake` make it layer-local. It's a real `Stroke` with `blendMode == .erase` (undoable).

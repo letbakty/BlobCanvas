@@ -62,7 +62,7 @@ The offscreen Metal renderer above is done and GPU-tested. What remains is inher
 
 ## Testing
 
-`swift test` runs 50 tests: codec round-trip/fuzz (3000 hostile-input decodes), incremental-encoder correctness, headless golden-pixel checks for both the Core Graphics and Metal renderers, layer compositing, viewport math, export, and replay. Requires the Xcode 16 toolchain (Swift 6):
+`swift test` runs 71 tests: codec round-trip/fuzz (3000 hostile-input decodes) and safety hardening (NaN/Inf, amplified counts, overflow), incremental-encoder correctness, headless golden-pixel checks for both the Core Graphics and Metal renderers, layer compositing, undo-checkpoint restore, viewport/zoom math, export, and replay. Requires the Xcode 16 toolchain (Swift 6):
 
 ```sh
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test
@@ -130,3 +130,5 @@ payload: canvasW f32 | canvasH f32 | activeLayer varint | layerCount varint
 ```
 
 Header scalars little-endian; points quantized (1/32 pt, 8-bit pressure, 1 ms) and delta-coded. `decode` dispatches per version — v1 (raw f32), v2 (delta, no flags), v3 (delta + flags), v4 (layers), v5 (incremental frames) — so old blobs keep loading.
+
+`decode` accepts arbitrary bytes and is hardened against hostile input: untrusted floats are sanitized (NaN/Inf → defaults, canvas clamped ≤ 16384), `reserveCapacity` is capped so an inflated count can't pre-allocate gigabytes, varint lengths are bounds-checked before `Int()` conversion, and delta accumulation wraps instead of trapping on overflow.

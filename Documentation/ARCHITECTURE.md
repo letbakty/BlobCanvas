@@ -131,7 +131,7 @@ Versions (all still decodable — `decode` dispatches per version):
 
 ## Testing strategy
 
-- **Codec:** round-trip (tolerance), stable re-encode (idempotent), legacy v1/v2 decode, implausible-count rejection, and **fuzzing** (3000 hostile/corrupted decodes must never trap) via a seeded SplitMix64 RNG.
+- **Codec:** round-trip (tolerance), stable re-encode (idempotent), legacy v1/v2 decode, implausible-count rejection, **fuzzing** (3000 hostile/corrupted decodes must never trap) via a seeded SplitMix64 RNG, and **safety hardening** (`CodecSafetyTests`: NaN/Inf canvas & brush, amplified counts, huge frame lengths, Int64 accumulator overflow — none may trap or OOM).
 - **Incremental:** matches one-shot, undo recompacts, multi-layer, sealed frames reused.
 - **Rendering (headless golden-pixel):** render session → `CGImage` → read a pixel → assert channels. Covers CG and Metal (skipped without a GPU), eraser clears, background fill, scale, layer opacity/visibility, and CG↔Metal agreement for opaque strokes.
 - **Viewport:** fit centering, round-trip mapping, focal-point-preserving zoom, clamping.
