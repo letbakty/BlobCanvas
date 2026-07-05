@@ -64,12 +64,12 @@ Tests/BlobCanvasTests/  codec, fuzz, incremental, rasterizer/Metal golden, layer
 - **`Data` slices keep parent indices** — never subscript a slice with `[0]`; use the codec `Reader`.
 - **Live vs committed:** the live preview is approximate (polyline, no smoothing, top-layer assumption); the authoritative render happens on commit / `rebake()` via `StrokeRasterizer`. Don't "fix" a preview mismatch by changing committed logic.
 - **Eraser** draws straight into `committed` for live feedback; `endStroke`/`rebake` make it layer-local. It's a real `Stroke` with `blendMode == .erase` (undoable).
-- **Metal:** uses a real `MTLBuffer` (never `setVertexBytes` — 4 KB limit fails real strokes). Reuse one `MetalSessionRenderer` instance (it compiles shaders in `init`). Metal path lacks smoothing / single-coverage translucency / group opacity — only opaque strokes match CG.
+- **Metal:** uses a real `MTLBuffer` (never `setVertexBytes` — 4 KB limit fails real strokes). Reuse one `MetalSessionRenderer` instance (it compiles shaders in `init`). It renders per-layer (group opacity + layer-local erase) with Catmull-Rom smoothing; the only remaining gap vs CG is per-stroke single-coverage translucency (self-overlaps of one translucent stroke double-blend).
 - **Rendering tests are headless golden-pixel:** render to a `CGImage`, read a pixel, assert channel values. Copy the `pixel(_:_:_:)` helper pattern from `RenderingTests`.
 - **No `Co-Authored-By` trailers** in commits; author is the user. Commit/branch only when asked.
 
 ## Known limitations (see ARCHITECTURE.md "Improvements")
 
-Remaining, all inherently device-bound: Metal is offscreen-only (no live `CAMetalLayer` view path); no IOSurface presentation or canvas tiling for very large canvases. The Metal renderer still lacks per-stroke single-coverage translucency and group opacity (opaque strokes match CG; smoothing/eraser/blend do). Display P3 is export-only; the live view renders sRGB.
+Remaining, all inherently device-bound: Metal is offscreen-only (no live `CAMetalLayer` view path); no IOSurface presentation or canvas tiling for very large canvases. The Metal renderer's one remaining gap vs CG is per-stroke single-coverage translucency (smoothing, layer opacity, layer-local erase, blend all match now). Display P3 is export-only; the live view renders sRGB.
 
 Already addressed (don't re-report): crisp zoom (re-bake at zoom resolution, pixel-budget capped), O(1) undo via opt-in `undoCheckpointDepth`, Intel-safe Metal blit read-back, layer frames keyed by `Layer.id`, Metal Catmull-Rom smoothing + radius-scaled caps, multi-layer eraser preview safety.
