@@ -46,11 +46,17 @@ public final class BlobCanvasController {
         engineView?.session ?? DrawingSession()
     }
 
-    func sessionDidChange(_ session: DrawingSession) {
+    /// Refreshes the mirrored toolbar/layer state from a session. Does **not**
+    /// signal a change, so it's safe to call on load.
+    func seed(_ session: DrawingSession) {
         canUndo = session.canUndo
         canRedo = session.canRedo
         layers = session.layers
         activeLayerIndex = session.activeLayerIndex
+    }
+
+    func sessionDidChange(_ session: DrawingSession) {
+        seed(session)
         onSessionChanged?(session)
     }
 }
@@ -104,6 +110,11 @@ public struct BlobCanvasView {
             controller?.sessionDidChange(session)
         }
         controller.engineView = view
+        // Seed the mirrored state from the (possibly loaded) session — otherwise
+        // a gallery-opened drawing shows an empty layer panel and disabled undo
+        // until the first edit. Uses `seed`, not `sessionDidChange`, so opening a
+        // drawing doesn't fire the autosave callback and mark it dirty.
+        controller.seed(view.session)
         return view
     }
 

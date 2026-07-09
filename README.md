@@ -63,7 +63,7 @@ The offscreen Metal renderer above is done and GPU-tested (smoothing, per-layer 
 
 ## Testing
 
-`swift test` runs 76 tests: codec round-trip/fuzz (3000 hostile-input decodes) and safety hardening (NaN/Inf, amplified counts, overflow), incremental-encoder correctness, headless golden-pixel checks for both renderers (including Metal layer opacity & layer-local erase), stroke coverage vs a `CGContext.strokePath` reference (no winding holes), layer compositing, undo-checkpoint restore, viewport/zoom math, all-layer export, and layer-preserving replay. Requires the Xcode 16 toolchain (Swift 6):
+`swift test` runs 81 tests: codec round-trip/fuzz (3000 hostile-input decodes) and safety hardening (NaN/Inf, amplified counts, overflow), incremental-encoder correctness (incl. undo-then-redraw at a seal boundary), headless golden-pixel checks for both renderers (including Metal layer opacity & layer-local erase), stroke coverage vs a `CGContext.strokePath` reference (no winding holes), layer compositing, undo-checkpoint restore (incl. cross-layer invalidation), controller state seeding on load, viewport/zoom math (incl. the pixel-budget ceiling), all-layer export, and layer-preserving replay. Requires the Xcode 16 toolchain (Swift 6):
 
 ```sh
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test

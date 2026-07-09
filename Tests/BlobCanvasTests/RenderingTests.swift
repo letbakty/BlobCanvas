@@ -231,19 +231,27 @@ final class CanvasViewportTests: XCTestCase {
     /// The render-scale rule (display × zoom, capped by a pixel budget) that
     /// keeps zoomed-in re-bakes crisp yet bounded. Mirrors the engine's logic.
     func testRenderScaleClampsToPixelBudget() {
-        let canvas = CGSize(width: 1000, height: 800)
         let maxPixels: CGFloat = 8_000_000
-        func renderScale(display: CGFloat, zoom: CGFloat) -> CGFloat {
+        func renderScale(canvas: CGSize, display: CGFloat, zoom: CGFloat) -> CGFloat {
             let wanted = display * max(zoom, 1)
             let budget = (maxPixels / (canvas.width * canvas.height)).squareRoot()
-            return max(display, min(wanted, budget))
+            return max(min(wanted, budget), 0.05)   // mirrors the engine
         }
+        let canvas = CGSize(width: 1000, height: 800)
         // No zoom: exactly display scale.
-        XCTAssertEqual(renderScale(display: 2, zoom: 1), 2, accuracy: 1e-6)
+        XCTAssertEqual(renderScale(canvas: canvas, display: 2, zoom: 1), 2, accuracy: 1e-6)
         // Moderate zoom scales up for crispness.
-        XCTAssertEqual(renderScale(display: 2, zoom: 1.4), 2.8, accuracy: 1e-6)
+        XCTAssertEqual(renderScale(canvas: canvas, display: 2, zoom: 1.4), 2.8, accuracy: 1e-6)
         // Extreme zoom is capped by the pixel budget (√(8e6/8e5) ≈ 3.16).
-        XCTAssertEqual(renderScale(display: 2, zoom: 100), 3.162, accuracy: 1e-2)
+        XCTAssertEqual(renderScale(canvas: canvas, display: 2, zoom: 100), 3.162, accuracy: 1e-2)
+
+        // Regression: a canvas large enough that even native display scale would
+        // blow the budget must drop BELOW display scale (bounded), not sit at it
+        // and attempt a multi-GB allocation. 8000×8000 → budget √(8e6/64e6)=0.354.
+        let huge = CGSize(width: 8000, height: 8000)
+        let scale = renderScale(canvas: huge, display: 2, zoom: 1)
+        XCTAssertEqual(scale, 0.354, accuracy: 1e-2)
+        XCTAssertLessThanOrEqual((huge.width * scale) * (huge.height * scale), maxPixels + 1)
     }
 
     func testPanIgnoredWhenNotZoomed() {

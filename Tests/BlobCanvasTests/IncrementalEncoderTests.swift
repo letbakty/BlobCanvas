@@ -85,6 +85,40 @@ final class IncrementalEncoderTests: XCTestCase {
         XCTAssertEqual(decoded.layers[1].strokes, oneShot.layers[1].strokes)
     }
 
+    /// Regression: undo past the seal boundary followed by NEW strokes can bring
+    /// the count back to `sealedCount` between saves. The stale sealed frame
+    /// must be detected (boundary stroke changed) and rebuilt — otherwise the
+    /// save silently keeps the undone stroke and loses the new one.
+    func testUndoRedrawSameCountRebuildsSealedFrames() throws {
+        let encoder = IncrementalDrawingEncoder(sealThreshold: 4)
+        var session = DrawingSession(canvasSize: SIMD2(300, 300))
+        for n in 0..<4 { session.commit(stroke(n)) }
+        _ = encoder.encode(session)                 // seals strokes 0-3
+
+        session.undo()                              // count 3 — no save in between
+        session.commit(stroke(99))                  // count back to 4, different stroke
+
+        let decoded = try DrawingSession(serialized: encoder.encode(session))
+        let oneShot = try DrawingSession(serialized: session.serialized())
+        XCTAssertEqual(decoded.strokes, oneShot.strokes)
+        XCTAssertEqual(decoded.strokes.last?.color, stroke(99).color)
+    }
+
+    /// Redo restores the identical stroke — sealed frames stay valid and must
+    /// NOT be rebuilt (that's the fast path working as intended).
+    func testUndoRedoKeepsSealedFrames() throws {
+        let encoder = IncrementalDrawingEncoder(sealThreshold: 4)
+        var session = DrawingSession(canvasSize: SIMD2(300, 300))
+        for n in 0..<4 { session.commit(stroke(n)) }
+        _ = encoder.encode(session)
+
+        session.undo()
+        session.redo()                              // same stroke back
+
+        let decoded = try DrawingSession(serialized: encoder.encode(session))
+        XCTAssertEqual(decoded.strokes, try DrawingSession(serialized: session.serialized()).strokes)
+    }
+
     func testResetForcesFullReencode() throws {
         let encoder = IncrementalDrawingEncoder()
         var session = DrawingSession()

@@ -19,7 +19,7 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -scheme Blob
 
 - Plain `swift build` (command-line toolchain) **fails** — SwiftData macro plugin is missing.
 - `Package.swift` is `swift-tools-version: 6.0`, `swiftLanguageMode(.v6)` — keep it concurrency-clean (value types are `Sendable`; the view/controller are `@MainActor`).
-- 76 tests must stay green. Metal tests `XCTSkip` when no GPU is present (CI runners), so a skip is not a failure.
+- 81 tests must stay green. Metal tests `XCTSkip` when no GPU is present (CI runners), so a skip is not a failure.
 
 ## Module layout
 

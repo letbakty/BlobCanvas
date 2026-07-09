@@ -266,12 +266,17 @@ public final class CanvasEngineView: PlatformView {
     @discardableResult
     public func addLayer(name: String? = nil) -> Int {
         let index = session.addLayer(name: name)
+        // Checkpoint keys are *active-layer* stroke counts; after switching the
+        // active layer, another layer's checkpoints could collide with the new
+        // layer's counts and restore the wrong pixels on undo. Drop them.
+        undoCheckpoints.invalidate()
         onSessionChanged?(session)
         return index
     }
 
     public func setActiveLayer(_ index: Int) {
         session.setActiveLayer(index)
+        undoCheckpoints.invalidate()   // keys are per-active-layer (see addLayer)
         onSessionChanged?(session)
     }
 
@@ -330,7 +335,14 @@ public final class CanvasEngineView: PlatformView {
         guard canvasSize.width > 0, canvasSize.height > 0 else { return base }
         let wanted = base * max(zoomScale, 1)
         let budget = (CGFloat(maxBackingPixels) / (canvasSize.width * canvasSize.height)).squareRoot()
-        return max(base, min(wanted, budget))
+        // `budget` is a HARD ceiling on backing pixels. Prefer native display
+        // scale for crispness, but when the canvas is large enough that even
+        // native scale would blow the budget, drop below it (bounded, mildly
+        // soft) rather than attempt a multi-GB allocation that silently fails
+        // (`calloc` → nil buffer → blank canvas). A `max(base, …)` floor here
+        // would defeat the budget entirely for large canvases. Floored at a tiny
+        // positive scale so a zero/absurd `maxBackingPixels` can't degenerate.
+        return max(min(wanted, budget), 0.05)
     }
 
     private func ensureBuffers() {
@@ -718,8 +730,10 @@ extension CanvasEngineView {
 
     public override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
         if let active = activeTouch, !touches.contains(active) { return }
-        activeTouch = nil
-        endStroke()
+        // System cancellation (palm rejection kicking in, incoming call, app
+        // switcher) means "this touch was not intentional input" — discard the
+        // partial stroke rather than committing it.
+        cancelActiveStroke()
     }
 
     private func normalizedForce(_ touch: UITouch) -> CGFloat {

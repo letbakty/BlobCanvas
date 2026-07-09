@@ -50,6 +50,39 @@ final class EngineCheckpointTests: XCTestCase {
         XCTAssertEqual(afterUndo.red, afterRed.red, accuracy: 4)
     }
 
+    /// Regression: checkpoint keys are active-layer stroke counts, so switching
+    /// layers must invalidate the ring. Otherwise a checkpoint recorded while
+    /// layer B was active can match layer A's count on undo and restore pixels
+    /// from the wrong history (undone stroke still visible, other layer's
+    /// strokes missing).
+    func testLayerSwitchInvalidatesCheckpoints() {
+        let view = CanvasEngineView(frame: CGRect(x: 0, y: 0, width: 100, height: 80))
+        view.load(DrawingSession(canvasSize: SIMD2(100, 80)))
+        view.undoCheckpointDepth = 4
+
+        // Layer 1: three red strokes; remember the pixel count after two.
+        view._commitStrokeForTesting(line(StrokeColor(r: 255, g: 0, b: 0), y: 10))
+        view._commitStrokeForTesting(line(StrokeColor(r: 255, g: 0, b: 0), y: 30))
+        let twoRed = colorCounts(view._committedImageForTesting()!).red
+        view._commitStrokeForTesting(line(StrokeColor(r: 255, g: 0, b: 0), y: 50))
+
+        // Layer 2: three blue strokes (checkpoints now keyed 0,1,2 for layer 2).
+        view.addLayer()
+        view._commitStrokeForTesting(line(StrokeColor(r: 0, g: 0, b: 255), y: 20))
+        view._commitStrokeForTesting(line(StrokeColor(r: 0, g: 0, b: 255), y: 40))
+        view._commitStrokeForTesting(line(StrokeColor(r: 0, g: 0, b: 255), y: 60))
+        let threeBlue = colorCounts(view._committedImageForTesting()!).blue
+
+        // Back to layer 1 (count 3) and undo its third stroke. Without
+        // invalidation, take(key: 2) would match layer 2's stale checkpoint.
+        view.setActiveLayer(0)
+        XCTAssertTrue(view.undo())
+
+        let counts = colorCounts(view._committedImageForTesting()!)
+        XCTAssertEqual(counts.red, twoRed, accuracy: 8, "third red stroke should be gone")
+        XCTAssertEqual(counts.blue, threeBlue, accuracy: 8, "all three blue strokes should remain")
+    }
+
     func testRedoAfterCheckpointUndo() {
         let view = CanvasEngineView(frame: CGRect(x: 0, y: 0, width: 100, height: 80))
         view.load(DrawingSession(canvasSize: SIMD2(100, 80)))
