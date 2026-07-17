@@ -143,6 +143,10 @@ Versions (all still decodable — `decode` dispatches per version):
 - **Viewport:** fit centering, round-trip mapping, focal-point-preserving zoom, clamping, and the render-scale **pixel-budget ceiling** (incl. a huge canvas that must drop below native scale).
 - **Regression (correctness pass):** undo-then-redraw at a seal boundary must not lose the new stroke; a layer switch must invalidate undo checkpoints (no cross-layer pixel restore); loading a drawing seeds the controller's mirror state **without** firing the autosave callback.
 
+Незакрытые находки код-ревью (гонки сохранений, декомпрессионная бомба,
+потеря данных при `snapshot()` без view) — в
+[WEAK-SPOTS.md](WEAK-SPOTS.md).
+
 ## Improvements / known gaps
 
 Recently closed: **O(N) offset-outline ribbon** (~15–20× faster rebake, hole-free), **white winding-holes on fast/dense strokes** (quad/outline wound to match caps), crisp zoom (re-bake at the zoom's resolution, capped by `maxBackingPixels`), O(1) undo (opt-in `undoCheckpointDepth` ring, rebake fallback), Intel-safe Metal read-back (`.private` → blit → shared buffer), incremental encoder keyed by `Layer.id`, Metal per-layer render (group opacity + layer-local erase) + smoothing, **SVG export of all layers** (was active-layer only), **layer-preserving replay**, Display P3 export.
