@@ -23,6 +23,12 @@ public final class Drawing {
     /// drawing just to show a cell. Spilled to external storage like the blob.
     @Attribute(.externalStorage) public var thumbnailData: Data?
 
+    /// Monotonic token guarding async saves (B1): each `save` call claims the
+    /// next token before encoding off-actor; when it finishes it only writes back
+    /// if it is still the latest. Prevents a slow older encode from clobbering a
+    /// newer one when strokes arrive faster than LZFSE compresses. Not persisted.
+    @Transient private var saveToken = 0
+
     public init(
         id: UUID = UUID(),
         title: String = "Untitled",
@@ -62,9 +68,13 @@ public extension Drawing {
     /// background task is fully isolated from further edits.
     @MainActor
     func save(_ session: DrawingSession) async {
+        saveToken &+= 1
+        let token = saveToken
         let blob = await Task.detached(priority: .utility) {
             session.serialized()
         }.value
+        // Более новый save уже записался — не откатываем его старым блобом (B1).
+        guard token == saveToken else { return }
         compressedData = blob
         modifiedAt = .now
     }
@@ -73,10 +83,13 @@ public extension Drawing {
     /// assigns both back. Use when you also want the gallery preview refreshed.
     @MainActor
     func save(_ session: DrawingSession, thumbnailMaxDimension: CGFloat) async {
+        saveToken &+= 1
+        let token = saveToken
         let (blob, thumb) = await Task.detached(priority: .utility) {
             (session.serialized(),
              DrawingExporter.thumbnailPNG(session, maxDimension: thumbnailMaxDimension))
         }.value
+        guard token == saveToken else { return }  // B1: newest save wins
         compressedData = blob
         thumbnailData = thumb
         modifiedAt = .now

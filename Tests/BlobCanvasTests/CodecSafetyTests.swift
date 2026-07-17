@@ -147,4 +147,16 @@ final class CodecSafetyTests: XCTestCase {
         XCTAssertNotNil(image)
         XCTAssertGreaterThanOrEqual(image!.width, 1)
     }
+
+    /// B3: a highly compressible payload (an LZFSE "bomb") that decodes past the
+    /// output cap must be rejected, not OOM. 200 MB of zeros compresses tiny.
+    func testDecompressionBombIsBounded() throws {
+        let huge = Data(count: 200 * 1024 * 1024)  // 200 MB of zeros
+        let bomb = try (huge as NSData).compressed(using: .lzfse) as Data
+        XCTAssertLessThan(bomb.count, 5 * 1024 * 1024, "sanity: bomb should be small")
+        // Under the default 256 MB cap it decodes; with a tiny cap it must fail
+        // gracefully (nil) rather than allocate 200 MB.
+        let capped = DrawingBlobCodec.boundedLZFSEDecompress(bomb, limit: 8 * 1024 * 1024)
+        XCTAssertNil(capped, "output past the cap must be rejected")
+    }
 }

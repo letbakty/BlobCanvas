@@ -11,8 +11,12 @@ import Foundation
 /// composites the same way the finished drawing does.
 public struct DrawingPlayer: Sendable {
 
-    /// Pause inserted between consecutive strokes, in seconds.
-    public var interStrokeGap: Double
+    /// Pause inserted between consecutive strokes, in seconds. Never negative:
+    /// a negative gap would run the timeline cursor backwards and scramble
+    /// replay ordering (B9).
+    public var interStrokeGap: Double {
+        didSet { if interStrokeGap < 0 { interStrokeGap = 0 } }
+    }
 
     private let session: DrawingSession
     /// Per layer, per stroke: absolute start time, end time, and the stroke's
@@ -25,7 +29,8 @@ public struct DrawingPlayer: Sendable {
 
     public init(_ session: DrawingSession, interStrokeGap: Double = 0.12) {
         self.session = session
-        self.interStrokeGap = interStrokeGap
+        let gap = max(0, interStrokeGap)  // B9: отрицательный ломает порядок
+        self.interStrokeGap = gap
 
         var timings: [[(start: Double, end: Double, base: Double)]] = []
         var layerRange: [(start: Double, end: Double)] = []
@@ -38,14 +43,14 @@ public struct DrawingPlayer: Sendable {
                 let base = Double(stroke.points.first?.timestamp ?? 0)
                 let d = Double(stroke.points.last?.timestamp ?? 0) - base
                 layerTimings.append((start: cursor, end: cursor + max(d, 0), base: base))
-                cursor += max(d, 0) + interStrokeGap
+                cursor += max(d, 0) + gap
             }
             timings.append(layerTimings)
-            layerRange.append((start: layerStart, end: max(cursor - interStrokeGap, layerStart)))
+            layerRange.append((start: layerStart, end: max(cursor - gap, layerStart)))
         }
         self.timings = timings
         self.layerRange = layerRange
-        self.duration = max(cursor - interStrokeGap, 0)
+        self.duration = max(cursor - gap, 0)
     }
 
     /// The drawing as it looked `time` seconds into its creation: earlier layers

@@ -18,6 +18,12 @@ public final class BlobCanvasController {
     /// Called whenever history changes — attach your debounced auto-save.
     public var onSessionChanged: ((DrawingSession) -> Void)?
 
+    /// Last session observed while the view was attached (B2). A debounced
+    /// autosave can fire *after* the engine view is torn down (screen dismissed);
+    /// without this, `snapshot()` would return a fresh empty session and clobber
+    /// the real drawing on disk. We fall back to this cache instead.
+    private var lastSession: DrawingSession?
+
     public init() {}
 
     public func undo() { engineView?.undo() }
@@ -42,13 +48,20 @@ public final class BlobCanvasController {
     public func setLayerVisible(_ visible: Bool, at index: Int) { engineView?.setLayerVisible(visible, at: index) }
 
     /// Current in-memory session, e.g. for `drawing.save(controller.snapshot())`.
+    /// Falls back to the last observed session if the view is already gone, so a
+    /// late autosave never writes an empty drawing over a real one (B2).
     public func snapshot() -> DrawingSession {
-        engineView?.session ?? DrawingSession()
+        if let live = engineView?.session {
+            lastSession = live
+            return live
+        }
+        return lastSession ?? DrawingSession()
     }
 
     /// Refreshes the mirrored toolbar/layer state from a session. Does **not**
     /// signal a change, so it's safe to call on load.
     func seed(_ session: DrawingSession) {
+        lastSession = session
         canUndo = session.canUndo
         canRedo = session.canRedo
         layers = session.layers
@@ -56,6 +69,7 @@ public final class BlobCanvasController {
     }
 
     func sessionDidChange(_ session: DrawingSession) {
+        lastSession = session
         seed(session)
         onSessionChanged?(session)
     }

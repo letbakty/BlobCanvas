@@ -203,10 +203,10 @@ public enum DrawingBlobCodec {
         case 0: body = try reader.remainder()
         case 1:
             let compressed = try reader.remainder()
-            guard let raw = try? (compressed as NSData).decompressed(using: .lzfse) else {
+            guard let raw = boundedLZFSEDecompress(compressed) else {
                 throw CodecError.decompressionFailed
             }
-            body = raw as Data
+            body = raw
         default: throw CodecError.decompressionFailed
         }
         var r = Reader(body)
@@ -392,6 +392,50 @@ public enum DrawingBlobCodec {
         return blob
     }
 
+    /// Hard ceiling on decompressed output (B3). LZFSE can inflate thousands-fold,
+    /// so a few-MB hostile/corrupt blob could expand to gigabytes and OOM the
+    /// process before any count sanity-check runs. We decompress in a stream and
+    /// abort past this bound. 256 MB dwarfs any legitimate drawing.
+    static let maxDecompressedBytes = 256 * 1024 * 1024
+
+    /// Streaming LZFSE decode with an output cap. Returns nil on corruption or if
+    /// the output would exceed `maxDecompressedBytes` (caller → decompressionFailed).
+    static func boundedLZFSEDecompress(_ input: Data, limit: Int = maxDecompressedBytes) -> Data? {
+        guard !input.isEmpty else { return nil }
+        // Heap-указатель: compression_stream_init инициализирует сырую память —
+        // не приходится конструировать C-struct с ненулевыми полями-указателями.
+        let streamPtr = UnsafeMutablePointer<compression_stream>.allocate(capacity: 1)
+        defer { streamPtr.deallocate() }
+        guard compression_stream_init(streamPtr, COMPRESSION_STREAM_DECODE, COMPRESSION_LZFSE)
+                == COMPRESSION_STATUS_OK else { return nil }
+        defer { compression_stream_destroy(streamPtr) }
+
+        var output = Data()
+        var dst = [UInt8](repeating: 0, count: 64 * 1024)
+        var failed = false
+        var finished = false
+
+        input.withUnsafeBytes { (src: UnsafeRawBufferPointer) in
+            guard let base = src.bindMemory(to: UInt8.self).baseAddress else { failed = true; return }
+            streamPtr.pointee.src_ptr = base
+            streamPtr.pointee.src_size = src.count
+            dst.withUnsafeMutableBufferPointer { buf in
+                let flag = Int32(COMPRESSION_STREAM_FINALIZE.rawValue)
+                while true {
+                    streamPtr.pointee.dst_ptr = buf.baseAddress!
+                    streamPtr.pointee.dst_size = buf.count
+                    let status = compression_stream_process(streamPtr, flag)
+                    let produced = buf.count - streamPtr.pointee.dst_size
+                    if produced > 0 { output.append(buf.baseAddress!, count: produced) }
+                    if output.count > limit { failed = true; return }
+                    if status == COMPRESSION_STATUS_END { finished = true; return }
+                    if status != COMPRESSION_STATUS_OK { failed = true; return }
+                }
+            }
+        }
+        return (failed || !finished) ? nil : output
+    }
+
     private static func decompressPayload(_ reader: inout Reader) throws -> Data {
         let algorithm: UInt8 = try reader.readByte()
         switch algorithm {
@@ -399,10 +443,10 @@ public enum DrawingBlobCodec {
             return try reader.remainder()
         case 1:
             let compressed = try reader.remainder()
-            guard let raw = try? (compressed as NSData).decompressed(using: .lzfse) else {
+            guard let raw = boundedLZFSEDecompress(compressed) else {
                 throw CodecError.decompressionFailed
             }
-            return raw as Data
+            return raw
         default:
             throw CodecError.decompressionFailed
         }

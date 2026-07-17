@@ -45,6 +45,17 @@ public struct DrawingSession: Sendable {
     /// Every stroke across all layers in composite (bottom-up) order.
     public var allStrokes: [Stroke] { layers.flatMap(\.strokes) }
 
+    /// Patches the pressure of one already-committed point. Used to apply Apple
+    /// Pencil force estimates that arrive *after* the stroke was committed (B5),
+    /// so the saved drawing keeps true pressure instead of the estimate. No-op if
+    /// indices are stale.
+    public mutating func updatePressure(layer li: Int, stroke si: Int, point pi: Int, to pressure: Float) {
+        guard layers.indices.contains(li),
+              layers[li].strokes.indices.contains(si),
+              layers[li].strokes[si].points.indices.contains(pi) else { return }
+        layers[li].strokes[si].points[pi].pressure = pressure
+    }
+
     // MARK: - Layer management
 
     @discardableResult

@@ -154,8 +154,15 @@ public final class CanvasEngineView: PlatformView {
     private var liveStroke = Stroke()
     private var liveStrokeStartTime: CFTimeInterval = 0
     private var isStroking = false
+    /// A layout arrived mid-stroke and we deferred the buffer rebuild (B8):
+    /// rebuilding then would `rebake()` and wipe the in-progress `live` overlay.
+    /// Applied in `endStroke`.
+    private var deferredBufferRebuild = false
 
     #if canImport(UIKit)
+    /// The just-committed stroke's (layer, index) while it still expects late
+    /// Pencil force updates (B5). Cleared when a new stroke starts or updates drain.
+    private var pendingEstimation: (layer: Int, stroke: Int)?
     /// Maps a touch's `estimationUpdateIndex` to the index of the point it
     /// produced in `liveStroke`, so late-arriving force values can patch it.
     private var estimationMap: [NSNumber: Int] = [:]
@@ -361,14 +368,21 @@ public final class CanvasEngineView: PlatformView {
     #if canImport(UIKit)
     public override func layoutSubviews() {
         super.layoutSubviews()
-        ensureBuffers()
+        ensureBuffersOrDefer()
     }
     #else
     public override func layout() {
         super.layout()
-        ensureBuffers()
+        ensureBuffersOrDefer()
     }
     #endif
+
+    /// Rebuilding buffers mid-stroke would `rebake()` and erase the live overlay
+    /// (rotation/resize during a drag). Defer to `endStroke` (B8).
+    private func ensureBuffersOrDefer() {
+        if isStroking { deferredBufferRebuild = true; return }
+        ensureBuffers()
+    }
 
     /// Redraws every committed stroke into `committed`. Only on undo/redo/
     /// clear/load/resize.
@@ -434,6 +448,9 @@ public final class CanvasEngineView: PlatformView {
     // MARK: - Live input (hot path)
 
     private func beginStroke(atCanvas p: CGPoint, pressure: CGFloat) {
+        // Ввод до первого layout (нулевые bounds) не мапится в координаты холста
+        // — игнорируем, иначе штрих сохранится в экранном пространстве (B6).
+        guard viewport().isMappable else { return }
         ensureBuffers()
         liveStroke = Stroke(points: [], color: brushColor, brushSize: brushSize,
                             blendMode: brushBlendMode, dynamics: brushDynamics)
@@ -442,6 +459,7 @@ public final class CanvasEngineView: PlatformView {
         isStroking = true
         #if canImport(UIKit)
         estimationMap.removeAll(keepingCapacity: true)
+        pendingEstimation = nil   // late updates for the previous stroke are moot
         #endif
         clearPredicted()
         appendLivePoint(atCanvas: p, pressure: pressure)
@@ -511,6 +529,7 @@ public final class CanvasEngineView: PlatformView {
         isStroking = false
         let stroke = liveStroke
         let preCount = session.strokes.count   // active layer count before commit
+        let committedLayer = session.activeLayerIndex
         session.commit(stroke)
         if !stroke.points.isEmpty {
             if stroke.blendMode == .erase || !session.activeLayerIsTopOpaque {
@@ -527,8 +546,21 @@ public final class CanvasEngineView: PlatformView {
         live?.clear()
         clearPredicted()
         #if canImport(UIKit)
-        estimationMap.removeAll(keepingCapacity: true)
+        // Keep estimationMap alive if force updates are still expected: they now
+        // patch the COMMITTED stroke (B5). Otherwise drop it.
+        if estimationMap.isEmpty {
+            pendingEstimation = nil
+        } else {
+            pendingEstimation = (layer: committedLayer, stroke: preCount)
+        }
+        #else
+        _ = (committedLayer, preCount)
         #endif
+        // A layout that arrived mid-stroke was deferred — apply it now (B8).
+        if deferredBufferRebuild {
+            deferredBufferRebuild = false
+            ensureBuffers()
+        }
         setNeedsFullDisplay()
         onSessionChanged?(session)
     }
@@ -710,14 +742,31 @@ extension CanvasEngineView {
     /// recorded with an estimate. Patches the stored data so the committed
     /// render uses the true pressure.
     public override func touchesEstimatedPropertiesUpdated(_ touches: Set<UITouch>) {
+        var patchedCommitted = false
         for touch in touches {
             guard let index = touch.estimationUpdateIndex,
-                  let pointIndex = estimationMap[index],
-                  pointIndex < liveStroke.points.count else { continue }
-            liveStroke.points[pointIndex].pressure = Float(normalizedForce(touch))
+                  let pointIndex = estimationMap[index] else { continue }
+            let force = Float(normalizedForce(touch))
+            if isStroking {
+                if pointIndex < liveStroke.points.count {
+                    liveStroke.points[pointIndex].pressure = force
+                }
+            } else if let pe = pendingEstimation {
+                // Стрелок уже закоммичен — патчим сохранённый штрих (B5), иначе
+                // в рисунке осталась бы оценочная сила на последних точках.
+                session.updatePressure(layer: pe.layer, stroke: pe.stroke,
+                                       point: pointIndex, to: force)
+                patchedCommitted = true
+            }
             if !touch.estimatedPropertiesExpectingUpdates.contains(.force) {
                 estimationMap[index] = nil
             }
+        }
+        if patchedCommitted {
+            rebake()
+            setNeedsFullDisplay()
+            onSessionChanged?(session)
+            if estimationMap.isEmpty { pendingEstimation = nil }
         }
     }
 

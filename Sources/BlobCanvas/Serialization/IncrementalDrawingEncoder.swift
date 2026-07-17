@@ -15,6 +15,10 @@ import Foundation
 ///
 /// Usage: keep one encoder per open drawing and call `encode(session)` from your
 /// debounced auto-save instead of `session.serialized()`.
+///
+/// - Important: **Not thread-safe** (B7). `cache` is mutated without
+///   synchronization, so drive one encoder from a single executor (the main
+///   actor, or one serial queue). Calling `encode` concurrently races the cache.
 public final class IncrementalDrawingEncoder {
 
     /// Strokes are sealed into an immutable frame once this many accumulate,
@@ -27,11 +31,13 @@ public final class IncrementalDrawingEncoder {
         var sealed: [Data] = []
         /// Number of strokes captured in `sealed`.
         var sealedCount: Int = 0
-        /// The stroke at `sealedCount - 1` when the frames were sealed. An undo
-        /// past the seal boundary followed by new strokes can bring the count
-        /// back to (or beyond) `sealedCount` between saves — the count alone
-        /// can't detect that, but the boundary stroke will have changed.
-        var lastSealed: Stroke?
+        /// The strokes of the LAST sealed frame (up to `sealThreshold`). An undo
+        /// past the seal boundary + redraw can restore the count between saves;
+        /// the count alone can't detect it. Comparing only the single boundary
+        /// stroke missed the case where a *programmatic* redraw reproduces a
+        /// byte-identical boundary stroke over a changed prefix (B4). Comparing
+        /// the whole last frame catches any change within the last sealed chunk.
+        var boundary: [Stroke] = []
     }
 
     /// Keyed by `Layer.id`, so sealed frames follow their layer across
@@ -58,14 +64,16 @@ public final class IncrementalDrawingEncoder {
 
             // Undo past a seal boundary invalidates sealed frames — rebuild.
             // The count comparison alone misses undo + redraw sequences that
-            // restore the count between saves, so also verify the boundary
-            // stroke is still the one we sealed (redo restores it identically;
-            // a new stroke won't match).
+            // restore the count between saves, so also verify the LAST sealed
+            // frame is byte-identical to what we sealed (B4): redo restores it,
+            // a changed prefix won't match even if the final stroke coincides.
             if current < state.sealedCount {
                 state = LayerFrames()
-            } else if let last = state.lastSealed, state.sealedCount > 0,
-                      strokes[state.sealedCount - 1] != last {
-                state = LayerFrames()
+            } else if state.sealedCount > 0 {
+                let lo = state.sealedCount - state.boundary.count
+                if lo < 0 || Array(strokes[lo..<state.sealedCount]) != state.boundary {
+                    state = LayerFrames()
+                }
             }
 
             // Seal full chunks that have accumulated since last time.
@@ -75,7 +83,10 @@ public final class IncrementalDrawingEncoder {
                 state.sealed.append(DrawingBlobCodec.encodeFrame(slice, count: sealThreshold))
                 state.sealedCount += sealThreshold
             }
-            if state.sealedCount > 0 { state.lastSealed = strokes[state.sealedCount - 1] }
+            if state.sealedCount > 0 {
+                let lo = max(0, state.sealedCount - sealThreshold)
+                state.boundary = Array(strokes[lo..<state.sealedCount])
+            }
             cache[layer.id] = state
 
             // Sealed frames + a freshly-encoded (small) tail.

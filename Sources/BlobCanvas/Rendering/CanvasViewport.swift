@@ -46,6 +46,11 @@ public struct CanvasViewport: Equatable, Sendable {
         CGRect(origin: origin, size: CGSize(width: canvasSize.width * scale, height: canvasSize.height * scale))
     }
 
+    /// True once the view has a usable size (`scale > 0`). Before first layout
+    /// coordinates can't be mapped — callers should ignore input until then (B6),
+    /// otherwise a stroke lands in raw view space instead of canvas space.
+    public var isMappable: Bool { scale > 0 }
+
     public func viewToCanvas(_ p: CGPoint, clamped: Bool = true) -> CGPoint {
         guard scale > 0 else { return p }
         var c = CGPoint(x: (p.x - origin.x) / scale, y: (p.y - origin.y) / scale)
