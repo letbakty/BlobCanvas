@@ -271,12 +271,21 @@ public final class CanvasEngineView: PlatformView {
     // MARK: - Layer API
 
     @discardableResult
+    /// Any structural layer change invalidates the stored (layer, stroke) index
+    /// a pending late-Pencil-force patch would target (C10). No-op off iOS.
+    private func clearPendingEstimation() {
+        #if canImport(UIKit)
+        pendingEstimation = nil
+        #endif
+    }
+
     public func addLayer(name: String? = nil) -> Int {
         let index = session.addLayer(name: name)
         // Checkpoint keys are *active-layer* stroke counts; after switching the
         // active layer, another layer's checkpoints could collide with the new
         // layer's counts and restore the wrong pixels on undo. Drop them.
         undoCheckpoints.invalidate()
+        clearPendingEstimation()
         onSessionChanged?(session)
         return index
     }
@@ -284,17 +293,20 @@ public final class CanvasEngineView: PlatformView {
     public func setActiveLayer(_ index: Int) {
         session.setActiveLayer(index)
         undoCheckpoints.invalidate()   // keys are per-active-layer (see addLayer)
+        clearPendingEstimation()
         onSessionChanged?(session)
     }
 
     public func removeActiveLayer() {
         session.removeActiveLayer()
+        clearPendingEstimation()
         rebake()
         onSessionChanged?(session)
     }
 
     public func moveLayer(from source: Int, to destination: Int) {
         session.moveLayer(from: source, to: destination)
+        clearPendingEstimation()
         rebake()
         onSessionChanged?(session)
     }
